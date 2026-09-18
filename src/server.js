@@ -77,11 +77,72 @@ function runPythonPlanner(input, selectedPlatform) {
     child.stdin.end(JSON.stringify({ ...input, platform: selectedPlatform }));
   });
 }
+function normalizePlatformInput(input) {
+  const numericFields = [
+    "minAltitudeM",
+    "maxAltitudeM",
+    "maxSpeedMS",
+    "maxRangeM",
+    "flightMinutes",
+    "reservePercent",
+    "batteryWh",
+    "takeoffWeightKg",
+    "payloadCapacityKg",
+    "cruiseSpeedMS",
+  ];
+  const config = {
+    category: String(input.category || "Мультикоптер").slice(0, 60),
+    description: String(input.description || "").slice(0, 500),
+    propulsion: String(input.propulsion || "").slice(0, 80),
+    launchType: String(input.launchType || "").slice(0, 80),
+  };
+  for (const field of numericFields) {
+    const value = Number(input[field]);
+    if (!Number.isFinite(value) || value < 0)
+      throw new Error(`Поле ${field} должно быть неотрицательным числом.`);
+    config[field] = value;
+  }
+  if (!config.maxAltitudeM || config.maxAltitudeM < config.minAltitudeM)
+    throw new Error("Максимальная высота должна быть больше минимальной.");
+  if (config.reservePercent > 80)
+    throw new Error("Резерв не может превышать 80%.");
+  return config;
+}
+function createPlatform(input) {
+  const name = String(input.name || "")
+    .trim()
+    .slice(0, 100);
+  if (!name) return { errors: ["Укажите название БВС."] };
+  try {
+    const config = normalizePlatformInput(input);
+    const id = `custom-${crypto.randomUUID()}`;
+    db.prepare(
+      "INSERT INTO platforms (id, name, config_json) VALUES (?, ?, ?)",
+    ).run(id, name, JSON.stringify({ id, name, userDefined: true, ...config }));
+    return { platform: { id, name, userDefined: true, ...config } };
+  } catch (error) {
+    return { errors: [error.message] };
+  }
+}
+function deletePlatform(id) {
+  const row = db
+    .prepare("SELECT config_json FROM platforms WHERE id=?")
+    .get(id);
+  if (!row) return { errors: ["БВС не найден."] };
+  const config = JSON.parse(row.config_json);
+  if (!config.userDefined)
+    return { errors: ["Системные платформы нельзя удалить."] };
+  db.prepare("DELETE FROM platforms WHERE id=?").run(id);
+  return { ok: true };
+}
+
 function platform(id) {
   const row = db
     .prepare("SELECT * FROM platforms WHERE id = ?")
     .get(id || "generic-quad");
-  return row ? { id: row.id, ...JSON.parse(row.config_json) } : null;
+  return row
+    ? { id: row.id, name: row.name, ...JSON.parse(row.config_json) }
+    : null;
 }
 function missionFromRow(row) {
   const record = parse(row);
@@ -263,8 +324,31 @@ function escapeXml(value) {
 async function api(request, response, url) {
   const parts = url.pathname.split("/").filter(Boolean);
   const id = parts[2];
-  if (parts[1] === "platforms" && request.method === "GET")
-    return send(response, 200, listRows(db, "platforms"));
+  if (parts[1] === "platforms") {
+    if (request.method === "GET" && !parts[2])
+      return send(response, 200, listRows(db, "platforms"));
+    if (request.method === "GET" && parts[2]) {
+      const row = db
+        .prepare("SELECT * FROM platforms WHERE id=?")
+        .get(parts[2]);
+      return row
+        ? send(response, 200, {
+            id: row.id,
+            name: row.name,
+            ...JSON.parse(row.config_json),
+          })
+        : send(response, 404, { error: "БВС не найден." });
+    }
+    if (request.method === "POST") {
+      const result = createPlatform(await body(request));
+      return send(response, result.errors ? 422 : 201, result);
+    }
+    if (request.method === "DELETE" && parts[2]) {
+      const result = deletePlatform(parts[2]);
+      return send(response, result.errors ? 422 : 200, result);
+    }
+    return send(response, 405, { error: "Метод не поддерживается." });
+  }
   if (parts[1] === "sensor-presets" && request.method === "GET")
     return send(response, 200, listRows(db, "sensor_presets"));
   if (parts[1] !== "missions")

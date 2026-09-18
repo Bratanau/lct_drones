@@ -60,8 +60,20 @@
               aria-label="Платформа"
             ></select
           ></label>
+          <div class="platform-actions">
+            <button id="platformDetailsBtn" class="small-button" type="button">
+              Характеристики
+            </button>
+            <button
+              id="addPlatformBtn"
+              class="small-button primary-small"
+              type="button"
+            >
+              + Добавить БВС
+            </button>
+          </div>
           <div id="platformInfo" class="platform-info" aria-live="polite">
-            Выберите тестовый БВС
+            Выберите БВС
           </div>
         </section>
 
@@ -204,6 +216,210 @@
       </section>
     </main>
 
+    <div id="platformDialog" class="dialog-backdrop" hidden>
+      <section
+        class="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="platformDialogTitle"
+      >
+        <div class="dialog-heading">
+          <h2 id="platformDialogTitle">Добавить БВС</h2>
+          <button
+            class="icon-button"
+            data-close-dialog="platformDialog"
+            type="button"
+            aria-label="Закрыть"
+          >
+            ×
+          </button>
+        </div>
+        <form id="platformForm" class="platform-form">
+          <div class="form-section-title">Идентификация</div>
+          <div class="two-fields">
+            <label
+              >Название<input
+                name="name"
+                required
+                maxlength="100"
+                placeholder="Например, Survey Pro X1"
+            /></label>
+            <label
+              >Категория<select name="category">
+                <option>Мультикоптер</option>
+                <option>Самолет</option>
+                <option>VTOL</option>
+                <option>Вертолет</option>
+                <option>Тестовый БВС</option>
+              </select></label
+            >
+          </div>
+          <label
+            >Описание<textarea
+              name="description"
+              rows="2"
+              maxlength="500"
+              placeholder="Назначение и особенности платформы"
+            ></textarea>
+          </label>
+          <div class="form-section-title">Летные характеристики</div>
+          <div class="three-fields">
+            <label
+              >Мин. высота, м<input
+                name="minAltitudeM"
+                type="number"
+                min="0"
+                max="10000"
+                step="1"
+                value="20"
+                required
+            /></label>
+            <label
+              >Макс. высота, м<input
+                name="maxAltitudeM"
+                type="number"
+                min="1"
+                max="10000"
+                step="1"
+                value="500"
+                required
+            /></label>
+            <label
+              >Макс. скорость, м/с<input
+                name="maxSpeedMS"
+                type="number"
+                min="0.1"
+                max="200"
+                step="0.1"
+                value="18"
+                required
+            /></label>
+            <label
+              >Дальность, м<input
+                name="maxRangeM"
+                type="number"
+                min="1"
+                max="1000000"
+                step="1"
+                value="12000"
+                required
+            /></label>
+            <label
+              >Время полета, мин<input
+                name="flightMinutes"
+                type="number"
+                min="1"
+                max="1440"
+                step="1"
+                value="28"
+                required
+            /></label>
+            <label
+              >Резерв, %<input
+                name="reservePercent"
+                type="number"
+                min="0"
+                max="80"
+                step="1"
+                value="20"
+                required
+            /></label>
+          </div>
+          <div class="form-section-title">Конструкция и оборудование</div>
+          <div class="three-fields">
+            <label
+              >Взлетная масса, кг<input
+                name="takeoffWeightKg"
+                type="number"
+                min="0"
+                max="500"
+                step="0.1"
+                value="2"
+            /></label>
+            <label
+              >Полезная нагрузка, кг<input
+                name="payloadCapacityKg"
+                type="number"
+                min="0"
+                max="200"
+                step="0.1"
+                value="0.5"
+            /></label>
+            <label
+              >Батарея, Вт·ч<input
+                name="batteryWh"
+                type="number"
+                min="0"
+                max="100000"
+                step="1"
+                value="180"
+            /></label>
+            <label
+              >Силовая установка<input
+                name="propulsion"
+                maxlength="80"
+                value="Электрическая"
+            /></label>
+            <label
+              >Взлет и посадка<input
+                name="launchType"
+                maxlength="80"
+                value="Вертикальные"
+            /></label>
+            <label
+              >Крейсерская скорость, м/с<input
+                name="cruiseSpeedMS"
+                type="number"
+                min="0"
+                max="200"
+                step="0.1"
+                value="10"
+            /></label>
+          </div>
+          <div class="dialog-actions">
+            <button
+              class="secondary-button"
+              data-close-dialog="platformDialog"
+              type="button"
+            >
+              Отмена</button
+            ><button class="primary" type="submit">Сохранить БВС</button>
+          </div>
+        </form>
+      </section>
+    </div>
+    <div id="detailsDialog" class="dialog-backdrop" hidden>
+      <section
+        class="dialog details-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="detailsDialogTitle"
+      >
+        <div class="dialog-heading">
+          <h2 id="detailsDialogTitle">Характеристики БВС</h2>
+          <button
+            class="icon-button"
+            data-close-dialog="detailsDialog"
+            type="button"
+            aria-label="Закрыть"
+          >
+            ×
+          </button>
+        </div>
+        <div id="platformDetails" class="details-grid"></div>
+        <div class="dialog-actions">
+          <button id="deletePlatformBtn" class="danger-button" type="button">
+            Удалить пользовательский БВС</button
+          ><button
+            class="primary"
+            data-close-dialog="detailsDialog"
+            type="button"
+          >
+            Закрыть
+          </button>
+        </div>
+      </section>
+    </div>
     <div id="toast" role="status" aria-live="polite"></div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>

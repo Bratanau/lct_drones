@@ -80,6 +80,21 @@ document.getElementById("platformSelect").addEventListener("change", () => {
   updatePlatformInfo();
   if (boundary) planRoute();
 });
+document.getElementById("addPlatformBtn").addEventListener("click", () => {
+  document.getElementById("platformDialog").hidden = false;
+});
+document
+  .getElementById("platformDetailsBtn")
+  .addEventListener("click", showPlatformDetails);
+document.querySelectorAll("[data-close-dialog]").forEach((button) =>
+  button.addEventListener("click", () => {
+    document.getElementById(button.dataset.closeDialog).hidden = true;
+  }),
+);
+document.getElementById("platformForm").addEventListener("submit", addPlatform);
+document
+  .getElementById("deletePlatformBtn")
+  .addEventListener("click", deleteSelectedPlatform);
 document
   .getElementById("duplicateBtn")
   .addEventListener("click", duplicateMission);
@@ -355,6 +370,98 @@ function exportMission() {
     "noopener",
   );
 }
+async function addPlatform(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const input = Object.fromEntries(new FormData(form));
+  try {
+    const response = await fetch("/api/platforms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const result = await response.json();
+    if (!response.ok)
+      throw new Error(
+        result.errors?.join(" ") ||
+          result.error ||
+          `Сервер вернул ошибку ${response.status}`,
+      );
+    platforms.push(result.platform);
+    const select = document.getElementById("platformSelect");
+    select.insertAdjacentHTML(
+      "beforeend",
+      `<option value="${result.platform.id}">${escapeHtml(result.platform.name)}</option>`,
+    );
+    select.value = result.platform.id;
+    updatePlatformInfo();
+    form.reset();
+    document.getElementById("platformDialog").hidden = true;
+    showToast("БВС добавлен в каталог");
+    if (boundary) planRoute();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+function selectedPlatform() {
+  return platforms.find(
+    (platform) =>
+      platform.id === document.getElementById("platformSelect").value,
+  );
+}
+function showPlatformDetails() {
+  const platform = selectedPlatform();
+  if (!platform) return showToast("Сначала выберите БВС");
+  const labels = {
+    name: "Название",
+    category: "Категория",
+    description: "Описание",
+    minAltitudeM: "Минимальная высота, м",
+    maxAltitudeM: "Максимальная высота, м",
+    maxSpeedMS: "Максимальная скорость, м/с",
+    maxRangeM: "Дальность, м",
+    flightMinutes: "Время полета, мин",
+    reservePercent: "Резерв, %",
+    takeoffWeightKg: "Взлетная масса, кг",
+    payloadCapacityKg: "Полезная нагрузка, кг",
+    batteryWh: "Батарея, Вт·ч",
+    propulsion: "Силовая установка",
+    launchType: "Взлет и посадка",
+    cruiseSpeedMS: "Крейсерская скорость, м/с",
+  };
+  document.getElementById("platformDetails").innerHTML = Object.entries(labels)
+    .filter(([key]) => platform[key] !== undefined && platform[key] !== "")
+    .map(
+      ([key, label]) =>
+        `<div><span>${label}</span><strong>${escapeHtml(String(platform[key]))}</strong></div>`,
+    )
+    .join("");
+  document.getElementById("deletePlatformBtn").hidden = !platform.userDefined;
+  document.getElementById("detailsDialog").hidden = false;
+}
+async function deleteSelectedPlatform() {
+  const platform = selectedPlatform();
+  if (!platform?.userDefined) return showToast("Системные БВС нельзя удалить");
+  if (!window.confirm(`Удалить БВС «${platform.name}»?`)) return;
+  const response = await fetch(`/api/platforms/${platform.id}`, {
+    method: "DELETE",
+  });
+  const result = await response.json();
+  if (!response.ok)
+    return showToast(
+      result.errors?.join(" ") ||
+        result.error ||
+        `Сервер вернул ошибку ${response.status}`,
+    );
+  platforms = platforms.filter((item) => item.id !== platform.id);
+  const select = document.getElementById("platformSelect");
+  select.querySelector(`option[value="${platform.id}"]`).remove();
+  select.value = "test-quad-mini";
+  updatePlatformInfo();
+  document.getElementById("detailsDialog").hidden = true;
+  showToast("Пользовательский БВС удален");
+  if (boundary) planRoute();
+}
 async function loadServerData() {
   try {
     const [missionsResponse, platformsResponse] = await Promise.all([
@@ -420,6 +527,7 @@ async function openMission(id) {
     document.querySelector(".mission-title input").value = mission.title;
     document.getElementById("platformSelect").value =
       mission.platformId || "generic-quad";
+    updatePlatformInfo();
     Object.entries(mission.settings).forEach(([key, value]) => {
       const element = document.getElementById(key);
       if (element) element.value = value;

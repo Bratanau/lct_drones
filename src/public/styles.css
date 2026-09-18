@@ -235,6 +235,127 @@ input[type="file"] {
 .mission-tools > select {
   width: 100%;
 }
+.platform-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.platform-actions button {
+  flex: 1;
+}
+.primary-small {
+  color: #fff;
+  border-color: var(--teal);
+  background: var(--teal);
+}
+.dialog-backdrop[hidden] {
+  display: none;
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #18212666;
+}
+.dialog {
+  width: min(700px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px #18212633;
+}
+.dialog-heading,
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dialog-heading {
+  margin-bottom: 18px;
+}
+.dialog-heading h2 {
+  margin: 0;
+  font:
+    700 16px Manrope,
+    sans-serif;
+}
+.platform-form {
+  display: grid;
+  gap: 12px;
+}
+.platform-form label {
+  display: grid;
+  gap: 5px;
+  color: #56676a;
+  font-size: 11px;
+}
+.platform-form input,
+.platform-form select,
+.platform-form textarea {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #cad5d5;
+  border-radius: 3px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+.form-section-title {
+  padding-top: 5px;
+  color: var(--teal-dark);
+  font:
+    700 12px Manrope,
+    sans-serif;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+.three-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.details-dialog {
+  width: min(560px, 100%);
+}
+.details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.details-grid div {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  background: #f1f6f5;
+  border-left: 2px solid #c6d6d4;
+}
+.details-grid span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.details-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.dialog-actions {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+.danger-button {
+  margin-right: auto;
+  border: 1px solid #c87565;
+  border-radius: 4px;
+  padding: 8px 10px;
+  color: #a13d2b;
+  background: #fff;
+  font-size: 11px;
+}
 .platform-info {
   display: grid;
   gap: 3px;
@@ -453,7 +574,11 @@ input[type="file"] {
     height: calc(100vh - 418px);
     min-height: 360px;
   }
-  .panel-block {
-    padding: 14px 15px;
+  .two-fields,
+  .three-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+  .details-grid {
+    grid-template-columns: 1fr;
   }
 }

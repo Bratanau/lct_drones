@@ -72,6 +72,41 @@ test("creates, updates, lists, versions, exports and deletes mission", async () 
   });
   assert.equal(response.status, 204);
 });
+test("creates and deletes a custom UAV with full specifications", async () => {
+  const response = await fetch(`${baseUrl}/api/platforms`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "API Test VTOL",
+      category: "VTOL",
+      description: "Custom aircraft",
+      minAltitudeM: 30,
+      maxAltitudeM: 300,
+      maxSpeedMS: 22,
+      maxRangeM: 18000,
+      flightMinutes: 45,
+      reservePercent: 25,
+      batteryWh: 420,
+      takeoffWeightKg: 8,
+      payloadCapacityKg: 1.5,
+      propulsion: "Electric",
+      launchType: "Vertical",
+      cruiseSpeedMS: 15,
+    }),
+  });
+  assert.equal(response.status, 201);
+  const created = await response.json();
+  assert.equal(created.platform.maxSpeedMS, 22);
+  const details = await fetch(
+    `${baseUrl}/api/platforms/${created.platform.id}`,
+  );
+  assert.equal((await details.json()).payloadCapacityKg, 1.5);
+  const deleted = await fetch(
+    `${baseUrl}/api/platforms/${created.platform.id}`,
+    { method: "DELETE" },
+  );
+  assert.equal(deleted.status, 200);
+});
 test("returns 422 for invalid planning input", async () => {
   const response = await fetch(`${baseUrl}/api/missions`, {
     method: "POST",
