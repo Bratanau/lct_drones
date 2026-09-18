@@ -12,6 +12,7 @@ let boundary = null;
 let routeLayer = null;
 let routeSegments = [];
 let missionId = localStorage.getItem("geoscan-planner-server-id");
+let platforms = [];
 let toastTimer;
 
 map.addControl(
@@ -69,6 +70,7 @@ document
     event.target.value ? openMission(event.target.value) : newMission(),
   );
 document.getElementById("platformSelect").addEventListener("change", () => {
+  updatePlatformInfo();
   if (boundary) planRoute();
 });
 document
@@ -110,7 +112,8 @@ function setBoundary(layer, fit = true) {
   drawnItems.addLayer(layer);
   if (fit) map.fitBounds(layer.getBounds(), { padding: [40, 40] });
   document.getElementById("emptyState").hidden = true;
-  updateArea();
+  document.getElementById("areaLabel").textContent = "--";
+  document.getElementById("summaryArea").textContent = "--";
   planRoute();
   saveMission();
 }
@@ -158,9 +161,8 @@ async function planRoute() {
     renderServerPlan(result.plan);
     setSaved("Сохранено на сервере");
   } catch (error) {
-    setSaved("Локальный расчёт");
-    showToast(`Сервер недоступен: ${error.message}`);
-    renderLocalPlan();
+    setSaved("Ошибка сервера");
+    showToast(`Python-планировщик недоступен: ${error.message}`);
   }
 }
 
@@ -195,88 +197,8 @@ function renderServerPlan(plan) {
   document.getElementById("lineCount").textContent =
     `${routeSegments.length} шт.`;
   document.getElementById("routeStatus").textContent =
-    plan.flights > 1 ? `${plan.flights} вылета` : "Маршрут готов";
+    plan.flights.length > 1 ? `${plan.flights.length} вылета` : "Маршрут готов";
   if (plan.recommendations?.length) showToast(plan.recommendations[0]);
-}
-
-function renderLocalPlan() {
-  const points = boundary.getLatLngs()[0];
-  const altitude = +document.getElementById("altitude").value || 120;
-  const speed = +document.getElementById("speed").value || 8;
-  const sideOverlap = +document.getElementById("sideOverlap").value || 70;
-  const factor = { rgb: 0.68, multispectral: 0.47, thermal: 0.52, lidar: 1.1 }[
-    document.getElementById("sensor").value
-  ];
-  routeSegments = makeLawnmower(
-    points,
-    Math.max(9, altitude * factor * (1 - sideOverlap / 100)),
-  );
-  if (routeLayer) map.removeLayer(routeLayer);
-  if (!routeSegments.length)
-    return showToast("Не удалось построить маршрут для этого контура");
-  routeLayer = L.polyline(routeSegments, {
-    color: "#115f9e",
-    weight: 2.5,
-    opacity: 0.9,
-    lineJoin: "round",
-  }).addTo(map);
-  const distance = routeSegments.reduce(
-    (total, segment) => total + polylineLength(segment),
-    0,
-  );
-  document.getElementById("routeLength").textContent =
-    distance >= 1000
-      ? `${(distance / 1000).toFixed(2)} км`
-      : `${Math.round(distance)} м`;
-  document.getElementById("flightTime").textContent = formatTime(
-    distance / speed,
-  );
-  document.getElementById("lineCount").textContent =
-    `${routeSegments.length} шт.`;
-  document.getElementById("routeStatus").textContent = "Локальный план";
-}
-
-// A local meter grid provides stable line spacing. Every line is clipped to the polygon as a separate segment.
-function makeLawnmower(latlngs, spacing) {
-  const center = boundary.getBounds().getCenter();
-  const scaleY = 111320;
-  const scaleX = scaleY * Math.cos((center.lat * Math.PI) / 180);
-  const polygon = latlngs.map((p) => [
-    (p.lng - center.lng) * scaleX,
-    (p.lat - center.lat) * scaleY,
-  ]);
-  const ys = polygon.map((p) => p[1]);
-  const output = [];
-  let reverse = false;
-  for (
-    let y = Math.min(...ys) + spacing / 2;
-    y < Math.max(...ys);
-    y += spacing
-  ) {
-    const hits = [];
-    for (let i = 0; i < polygon.length; i++) {
-      const a = polygon[i],
-        b = polygon[(i + 1) % polygon.length];
-      if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y))
-        hits.push(a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]));
-    }
-    hits.sort((a, b) => a - b);
-    for (let i = 0; i + 1 < hits.length; i += 2) {
-      const segment = [
-        [hits[i], y],
-        [hits[i + 1], y],
-      ];
-      if (reverse) segment.reverse();
-      output.push(
-        segment.map((p) => [
-          p[1] / scaleY + center.lat,
-          p[0] / scaleX + center.lng,
-        ]),
-      );
-      reverse = !reverse;
-    }
-  }
-  return output;
 }
 
 async function importFile(event) {
@@ -413,27 +335,6 @@ function loadMission() {
     localStorage.removeItem(STORAGE_KEY);
   }
 }
-function geodesicArea(points) {
-  let sum = 0;
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i],
-      b = points[(i + 1) % points.length];
-    sum +=
-      (((b.lng - a.lng) * Math.PI) / 180) *
-      (2 +
-        Math.sin((a.lat * Math.PI) / 180) +
-        Math.sin((b.lat * Math.PI) / 180));
-  }
-  return Math.abs((sum * 6378137 ** 2) / 2);
-}
-function polylineLength(points) {
-  return points
-    .slice(1)
-    .reduce(
-      (sum, point, index) => sum + L.latLng(points[index]).distanceTo(point),
-      0,
-    );
-}
 function formatArea(area) {
   return area > 9999
     ? `${(area / 10000).toFixed(2)} га`
@@ -446,56 +347,12 @@ function formatTime(seconds) {
     : `${minutes} мин`;
 }
 function exportMission() {
-  if (missionId)
-    return window.open(
-      `/api/missions/${missionId}/export?format=${document.getElementById("exportFormat").value}`,
-      "_blank",
-      "noopener",
-    );
-  if (!boundary || !routeSegments.length)
-    return showToast("Постройте маршрут перед экспортом");
-  const data = {
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: {
-          name: "Контур работ",
-          mission: document.querySelector(".mission-title input").value,
-        },
-        geometry: {
-          type: "Polygon",
-          coordinates: [
-            boundary.getLatLngs()[0].map((point) => [point.lng, point.lat]),
-          ],
-        },
-      },
-      {
-        type: "Feature",
-        properties: {
-          name: "Маршрут съёмки",
-          altitude_m: +document.getElementById("altitude").value,
-          speed_ms: +document.getElementById("speed").value,
-          sensor: document.getElementById("sensor").value,
-        },
-        geometry: {
-          type: "MultiLineString",
-          coordinates: routeSegments.map((segment) =>
-            segment.map(([lat, lng]) => [lng, lat]),
-          ),
-        },
-      },
-    ],
-  };
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(data, null, 2)], { type: "application/geo+json" }),
+  if (!missionId) return showToast("Сначала постройте и сохраните маршрут");
+  return window.open(
+    `/api/missions/${missionId}/export?format=${document.getElementById("exportFormat").value}`,
+    "_blank",
+    "noopener",
   );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "geoscan-mission.geojson";
-  link.click();
-  URL.revokeObjectURL(url);
-  showToast("Маршрут экспортирован");
 }
 async function loadServerData() {
   try {
@@ -505,7 +362,7 @@ async function loadServerData() {
     ]);
     if (!missionsResponse.ok || !platformsResponse.ok)
       throw new Error("API недоступен");
-    const [missions, platforms] = await Promise.all([
+    const [missions, platformData] = await Promise.all([
       missionsResponse.json(),
       platformsResponse.json(),
     ]);
@@ -519,12 +376,14 @@ async function loadServerData() {
         )
         .join("");
     const platformSelect = document.getElementById("platformSelect");
+    platforms = platformData;
     platformSelect.innerHTML = platforms
       .map(
         (platform) =>
           `<option value="${platform.id}">${escapeHtml(platform.name)}</option>`,
       )
       .join("");
+    updatePlatformInfo();
     if (missionId && missions.some((mission) => mission.id === missionId)) {
       missionSelect.value = missionId;
       await openMission(missionId);
@@ -533,6 +392,18 @@ async function loadServerData() {
     setSaved("Офлайн-черновик");
     showToast("Сервер недоступен. Работает локальный черновик.");
   }
+}
+function updatePlatformInfo() {
+  const selected = platforms.find(
+    (platform) =>
+      platform.id === document.getElementById("platformSelect").value,
+  );
+  const info = document.getElementById("platformInfo");
+  if (!selected) {
+    info.textContent = "Выберите тестовый БВС";
+    return;
+  }
+  info.innerHTML = `<strong>${escapeHtml(selected.category || "БВС")}</strong><span>${escapeHtml(selected.description || "")}</span><small>${selected.maxRangeM / 1000} км · до ${selected.maxSpeedMS} м/с · ${selected.flightMinutes} мин</small>`;
 }
 async function openMission(id) {
   try {

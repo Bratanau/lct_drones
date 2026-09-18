@@ -1,13 +1,13 @@
 const fs = require("node:fs/promises");
+const crypto = require("node:crypto");
+const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
-const crypto = require("node:crypto");
 const { openDatabase, parse, listRows } = require("./database");
-const { planMission, normalizeGeometry } = require("./mission-planner");
 
 const ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.join(__dirname, "public");
-const PORT = Number(process.env.PORT || 4173);
+const PYTHON_BIN = process.env.PYTHON_BIN || "python";
 const db = openDatabase(
   process.env.GEOSCAN_DB || path.join(ROOT, "data", "geoscan.db"),
 );
@@ -47,6 +47,35 @@ function send(response, status, data, headers = {}) {
   });
   response.end(data === undefined ? "" : JSON.stringify(data));
 }
+function runPythonPlanner(input, selectedPlatform) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, ["-m", "src.geometry.service"], {
+      cwd: ROOT,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (stdout.length > 5 * 1024 * 1024) child.kill();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", (error) => reject(error));
+    child.once("close", (code) => {
+      try {
+        const result = JSON.parse(stdout);
+        if (code === 0 || result.errors) resolve(result);
+        else reject(new Error(result.errors.join(" ")));
+      } catch (_) {
+        reject(new Error(stderr || "Python planner returned invalid JSON."));
+      }
+    });
+    child.stdin.end(JSON.stringify({ ...input, platform: selectedPlatform }));
+  });
+}
 function platform(id) {
   const row = db
     .prepare("SELECT * FROM platforms WHERE id = ?")
@@ -75,16 +104,10 @@ function snapshot(id, event) {
       "INSERT INTO mission_versions (mission_id, event, snapshot_json, created_at) VALUES (?, ?, ?, ?)",
     ).run(id, event, JSON.stringify(missionFromRow(row)), now());
 }
-function saveMission(input, existing) {
+async function saveMission(input, existing) {
   const selectedPlatform = platform(input.platformId || existing?.platform_id);
   if (!selectedPlatform) return { errors: ["Выбранная платформа не найдена."] };
-  const result = planMission(input, {
-    platform: selectedPlatform,
-    restrictedZones: db
-      .prepare("SELECT geometry_json FROM restricted_zones")
-      .all()
-      .map((row) => JSON.parse(row.geometry_json)),
-  });
+  const result = await runPythonPlanner(input, selectedPlatform);
   if (result.errors) return result;
   const id = existing?.id || crypto.randomUUID();
   const timestamp = now();
@@ -134,27 +157,23 @@ function saveMission(input, existing) {
   };
 }
 function exportGeoJson(mission) {
-  const geometry = normalizeGeometry(mission);
-  const polygonCoordinates =
-    geometry.type === "MultiPolygon"
-      ? geometry.polygons.map((polygon) =>
-          [polygon.outer, ...polygon.holes].map((ring) =>
-            [...ring, ring[0]].map(([lat, lng]) => [lng, lat]),
-          ),
-        )
-      : null;
+  const polygonCoordinates = mission.boundary
+    ? [mission.boundary.map(([lat, lng]) => [lng, lat])]
+    : null;
+  const workGeometry =
+    mission.geometry ||
+    (polygonCoordinates
+      ? { type: "Polygon", coordinates: polygonCoordinates }
+      : null);
   return {
     type: "FeatureCollection",
     features: [
-      ...(polygonCoordinates
+      ...(workGeometry
         ? [
             {
               type: "Feature",
               properties: { name: "Контур работ", mission: mission.title },
-              geometry: {
-                type: "MultiPolygon",
-                coordinates: polygonCoordinates,
-              },
+              geometry: workGeometry,
             },
           ]
         : []),
@@ -259,7 +278,7 @@ async function api(request, response, url) {
         .map(missionFromRow),
     );
   if (!id && request.method === "POST") {
-    const saved = saveMission(await body(request));
+    const saved = await saveMission(await body(request));
     return saved.errors
       ? send(response, 422, saved)
       : send(response, 201, saved.mission);
@@ -284,7 +303,7 @@ async function api(request, response, url) {
         })),
     );
   if (parts[3] === "duplicate" && request.method === "POST") {
-    const duplicate = saveMission({
+    const duplicate = await saveMission({
       ...mission,
       title: `${mission.title} (копия)`,
       status: "draft",
@@ -323,7 +342,7 @@ async function api(request, response, url) {
   }
   if (request.method === "GET") return send(response, 200, mission);
   if (request.method === "PUT") {
-    const saved = saveMission(await body(request), row);
+    const saved = await saveMission(await body(request), row);
     return saved.errors
       ? send(response, 422, saved)
       : send(response, 200, saved.mission);

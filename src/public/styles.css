@@ -235,6 +235,25 @@ input[type="file"] {
 .mission-tools > select {
   width: 100%;
 }
+.platform-info {
+  display: grid;
+  gap: 3px;
+  margin-top: 9px;
+  padding: 8px 9px;
+  background: #f1f6f5;
+  border-left: 3px solid var(--teal);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.platform-info strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+.platform-info small {
+  color: var(--teal-dark);
+  font-weight: 600;
+}
 .small-button {
   border: 1px solid #9cacaf;
   background: #fff;

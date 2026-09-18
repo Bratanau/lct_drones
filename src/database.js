@@ -40,6 +40,8 @@ function seed(db) {
     "Геоскан 201",
     JSON.stringify({
       id: "geoscan-201",
+      category: "Промышленный БВС",
+      description: "Демонстрационный промышленный квадрокоптер.",
       maxAltitudeM: 500,
       minAltitudeM: 50,
       maxSpeedMS: 30,
@@ -47,6 +49,38 @@ function seed(db) {
       flightMinutes: 180,
       reservePercent: 25,
       batteryWh: 1100,
+    }),
+  );
+  platform.run(
+    "test-quad-mini",
+    "Тестовый квадрокоптер Mini",
+    JSON.stringify({
+      id: "test-quad-mini",
+      category: "Тестовый БВС",
+      description: "Учебная платформа для быстрой проверки маршрутов.",
+      maxAltitudeM: 120,
+      minAltitudeM: 20,
+      maxSpeedMS: 12,
+      maxRangeM: 7000,
+      flightMinutes: 22,
+      reservePercent: 25,
+      batteryWh: 95,
+    }),
+  );
+  platform.run(
+    "test-fixed-wing",
+    "Тестовый самолет Геоскан",
+    JSON.stringify({
+      id: "test-fixed-wing",
+      category: "Тестовый БВС",
+      description: "Учебная самолетная платформа для длинных маршрутов.",
+      maxAltitudeM: 500,
+      minAltitudeM: 80,
+      maxSpeedMS: 28,
+      maxRangeM: 45000,
+      flightMinutes: 120,
+      reservePercent: 30,
+      batteryWh: 720,
     }),
   );
   const sensor = db.prepare(

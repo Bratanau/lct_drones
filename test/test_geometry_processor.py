@@ -2,7 +2,8 @@
 
 import unittest
 
-from src.geometry_processor import FlightPlannerGeometry, InvalidPolygonError, PolygonRequest
+from src.geometry.geometry_processor import FlightPlannerGeometry
+from src.geometry.models import InvalidPolygonError, PolygonRequest
 
 
 class FlightPlannerGeometryTests(unittest.TestCase):

@@ -41,10 +41,10 @@ npm start
 
 ```powershell
 python -m pip install -r requirements.txt
-python src/geometry_processor.py
+python -m src.geometry.geometry_processor
 ```
 
-Python-модуль принимает координаты в порядке GeoJSON `[longitude, latitude]`. Он динамически выбирает UTM-зону, строит галсы в метрах и возвращает задачи для маршрутизатора.
+Node отвечает только за HTTP, SQLite и экспорт. Все расчеты геометрии, проекции, нарезка галсов, длины маршрутов и разбиение на вылеты выполняются Python-планировщиком.
 
 Остановить фоновый процесс Node.js в PowerShell:
 
@@ -75,20 +75,23 @@ npm run format
 src/
   server.js             HTTP-сервер и REST API
   database.js           SQLite-схема и начальные пресеты
-  mission-planner.js    JS fallback и текущая API-совместимая логика
-  geometry_processor.py Python GIS-ядро галсов (Shapely/PyProj/Pydantic)
+  geometry/
+    __init__.py           пакет геометрического ядра
+    models.py             Pydantic-модели и ошибки
+    projection.py         WGS84/UTM и трансформации
+    track_slicer.py       отдельная логика нарезки галсов
+    geometry_processor.py выбор направления и форматирование галсов
+    service.py            JSON subprocess-контракт для Node API
   public/
-    index.html          интерфейс
-    app.js              клиентская логика Leaflet/API
-    styles.css          стили интерфейса
+    index.html            интерфейс
+    app.js                клиентская логика Leaflet/API
+    styles.css            стили интерфейса
 test/
-  planner.test.js       базовые проверки планировщика
-  mission-planner.test.js геометрические режимы и отверстия
-  api.test.js           CRUD, версии и экспорт
+  api.test.js             CRUD, Python-планировщик, версии и экспорт
   test_geometry_processor.py Python-валидация и геометрическое ядро
 ```
 
-Сервер намеренно не использует фреймворк: небольшое REST API остается прозрачным, запускается одной командой и не требует сборки frontend-кода.
+Сервер намеренно оставлен тонким: Node обрабатывает HTTP, SQLite и экспорт, а единственный источник сложной геометрической логики — Python-пакет `src.geometry`. Node запускает его через JSON stdin/stdout, поэтому этот же пакет можно напрямую подключить к FastAPI.
 
 ## API
 
