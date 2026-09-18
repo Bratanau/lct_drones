@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Geoscan Planner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha512-p4NxAoJBhIINfQ3i0s0KIXSNE6rEqE/WnHfLm/JvGxZ0Q9V8SIE7x2oXj1VNhK5QwT2ZJITs0InxSWAR7J0lNw=="
+      crossorigin=""
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Geoscan Planner"
+        >GEO<span>SCAN</span><small>PLANNER</small></a
+      >
+      <div class="mission-title">
+        <span class="status-dot"></span
+        ><input aria-label="Название миссии" value="Новая миссия" />
+      </div>
+      <div class="top-actions">
+        <span id="saveState" class="save-state">Локально сохранено</span>
+        <div class="export-actions">
+          <select id="exportFormat" aria-label="Формат экспорта">
+            <option value="geojson">GeoJSON</option>
+            <option value="kml">KML</option>
+            <option value="csv">CSV</option>
+            <option value="waypoints">Waypoints</option></select
+          ><button id="exportBtn" class="primary" type="button">Экспорт</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar" aria-label="Параметры миссии">
+        <section class="panel-block mission-tools">
+          <div class="section-heading">
+            <h2>Миссии</h2>
+            <button id="duplicateBtn" class="small-button" type="button">
+              Дублировать
+            </button>
+          </div>
+          <select id="missionSelect" aria-label="Выбрать миссию">
+            <option value="">Новая миссия</option>
+          </select>
+          <label
+            >Платформа<select
+              id="platformSelect"
+              aria-label="Платформа"
+            ></select
+          ></label>
+        </section>
+
+        <section class="panel-block">
+          <div class="section-heading">
+            <h2>Контур работ</h2>
+            <span id="areaLabel" class="metric">0 га</span>
+          </div>
+          <div class="import-row">
+            <label class="file-button" for="fileInput">Импорт</label>
+            <input
+              id="fileInput"
+              type="file"
+              accept=".geojson,.json,.kml,application/geo+json,application/vnd.google-earth.kml+xml"
+            />
+            <button id="demoArea" class="secondary-button" type="button">
+              Демо
+            </button>
+            <button
+              id="clearArea"
+              class="icon-button"
+              title="Очистить контур"
+              aria-label="Очистить контур"
+            >
+              ×
+            </button>
+          </div>
+          <p class="hint">
+            GeoJSON или KML. Нарисуйте полигон инструментом на карте.
+          </p>
+        </section>
+
+        <section class="panel-block">
+          <div class="section-heading"><h2>Тип задания</h2></div>
+          <div class="segmented" role="group" aria-label="Тип задания">
+            <button class="selected" type="button" data-mode="survey">
+              Съёмка</button
+            ><button type="button" data-mode="inspection">Инспекция</button
+            ><button type="button" data-mode="corridor">Коридор</button
+            ><button type="button" data-mode="lidar">LiDAR</button>
+          </div>
+        </section>
+
+        <section class="panel-block settings">
+          <div class="section-heading"><h2>Полезная нагрузка</h2></div>
+          <label
+            >Сенсор<select id="sensor">
+              <option value="rgb">RGB-камера</option>
+              <option value="multispectral">Мультиспектральная</option>
+              <option value="thermal">Тепловизор</option>
+              <option value="lidar">LiDAR</option>
+            </select></label
+          >
+          <div class="two-fields">
+            <label
+              >Высота, м<input
+                id="altitude"
+                type="number"
+                min="20"
+                max="500"
+                value="120"
+            /></label>
+            <label
+              >Скорость, м/с<input
+                id="speed"
+                type="number"
+                min="1"
+                max="30"
+                value="8"
+            /></label>
+          </div>
+          <div class="two-fields">
+            <label
+              >Продольное перекрытие, %<input
+                id="frontOverlap"
+                type="number"
+                min="50"
+                max="95"
+                value="75"
+            /></label>
+            <label
+              >Поперечное перекрытие, %<input
+                id="sideOverlap"
+                type="number"
+                min="50"
+                max="95"
+                value="70"
+            /></label>
+          </div>
+        </section>
+
+        <section class="panel-block route-summary">
+          <div class="section-heading">
+            <h2>Расчёт миссии</h2>
+            <span id="routeStatus" class="quiet-status">Нет контура</span>
+          </div>
+          <div class="summary-grid">
+            <div><span>Площадь</span><strong id="summaryArea">--</strong></div>
+            <div><span>Маршрут</span><strong id="routeLength">--</strong></div>
+            <div><span>Время</span><strong id="flightTime">--</strong></div>
+            <div><span>Полос</span><strong id="lineCount">--</strong></div>
+          </div>
+          <button id="planBtn" class="plan-button" type="button">
+            Построить маршрут
+          </button>
+        </section>
+      </aside>
+
+      <section class="map-shell">
+        <div id="map" aria-label="Карта планирования миссии"></div>
+        <div class="map-toolbar" aria-label="Инструменты карты">
+          <button
+            id="locateBtn"
+            title="Моё местоположение"
+            aria-label="Моё местоположение"
+            type="button"
+          >
+            ⌖
+          </button>
+          <button
+            id="fitBtn"
+            title="Показать область работ"
+            aria-label="Показать область работ"
+            type="button"
+          >
+            ⛶
+          </button>
+        </div>
+        <div id="emptyState" class="map-empty-state">
+          <strong>Задайте границу работ</strong
+          ><span
+            >Импортируйте файл или выберите инструмент полигона слева на
+            карте.</span
+          >
+        </div>
+        <div class="legend">
+          <span class="legend-route"></span>Маршрут съёмки
+          <span class="legend-area"></span>Контур работ
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha512-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBoMSnYQOq6pQGiNEqB+JcI5PES7MhjDkRs3fq8S9weQ=="
+      crossorigin=""
+    ></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,9 +1,17 @@
 {
   "name": "geoscan-planner-mvp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "start": "node src/server.js",
+    "test": "node --test test/planner.test.js test/mission-planner.test.js test/api.test.js",
+    "format": "prettier --write src test package.json README.md",
+    "format:check": "prettier --check src test package.json README.md"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.8"
   }
 }

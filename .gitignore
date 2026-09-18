@@ -1,0 +1,8 @@
+node_modules/
+data/
+.vite/
+__pycache__/
+*.py[cod]
+*.db
+*.db-shm
+*.db-wal
