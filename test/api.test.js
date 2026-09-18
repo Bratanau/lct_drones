@@ -29,6 +29,15 @@ test.before(async () => {
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 test.after(() => server.close());
+test("exposes demo map assets and seeded UAV platforms", async () => {
+  let response = await fetch(`${baseUrl}/`);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /leaflet/);
+  response = await fetch(`${baseUrl}/api/platforms`);
+  const platforms = await response.json();
+  assert.ok(platforms.some((platform) => platform.id === "test-quad-mini"));
+  assert.ok(platforms.some((platform) => platform.id === "test-fixed-wing"));
+});
 test("creates, updates, lists, versions, exports and deletes mission", async () => {
   let response = await fetch(`${baseUrl}/api/missions`, {
     method: "POST",

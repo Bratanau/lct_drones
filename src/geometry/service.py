@@ -43,11 +43,12 @@ def plan_mission(payload: dict[str, Any]) -> dict[str, Any]:
     if platform_errors:
         return {"errors": platform_errors}
 
-    if geometry.geom_type == "LineString":
+    if (geometry.geom_type == "LineString"):
         segments = _line_segments(geometry)
         angle = None
         spacing = max(10.0, altitude * 0.5)
         area_m2 = 0.0
+        points = []
     else:
         projection = select_utm_projection(geometry)
         polygon_utm = project_polygon(geometry, projection)

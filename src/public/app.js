@@ -2,10 +2,17 @@
 const STORAGE_KEY = "geoscan-planner-mission-v1";
 const map = L.map("map", { zoomControl: false }).setView([55.751, 37.618], 12);
 L.control.zoom({ position: "bottomright" }).addTo(map);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 20,
-  attribution: "&copy; OpenStreetMap",
-}).addTo(map);
+const baseLayer = L.tileLayer(
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  {
+    maxZoom: 20,
+    attribution: "&copy; OpenStreetMap",
+    crossOrigin: true,
+  },
+).addTo(map);
+baseLayer.on("tileerror", () => {
+  showToast("Базовая карта недоступна: проверьте интернет-соединение");
+});
 
 const drawnItems = new L.FeatureGroup().addTo(map);
 let boundary = null;
@@ -134,12 +141,6 @@ function clearMission() {
   localStorage.removeItem("geoscan-planner-server-id");
   missionId = null;
   setSaved("Миссия очищена");
-}
-
-function updateArea() {
-  const area = geodesicArea(boundary.getLatLngs()[0]);
-  document.getElementById("areaLabel").textContent = formatArea(area);
-  document.getElementById("summaryArea").textContent = formatArea(area);
 }
 
 async function planRoute() {
@@ -383,10 +384,14 @@ async function loadServerData() {
           `<option value="${platform.id}">${escapeHtml(platform.name)}</option>`,
       )
       .join("");
+    if (platforms.some((platform) => platform.id === "test-quad-mini"))
+      platformSelect.value = "test-quad-mini";
     updatePlatformInfo();
     if (missionId && missions.some((mission) => mission.id === missionId)) {
       missionSelect.value = missionId;
       await openMission(missionId);
+    } else if (!boundary) {
+      loadDemoArea();
     }
   } catch (_) {
     setSaved("Офлайн-черновик");

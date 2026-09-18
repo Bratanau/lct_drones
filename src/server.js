@@ -8,6 +8,7 @@ const { openDatabase, parse, listRows } = require("./database");
 const ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.join(__dirname, "public");
 const PYTHON_BIN = process.env.PYTHON_BIN || "python";
+const PORT = Number(process.env.GEOSCAN_PORT || 4173);
 const db = openDatabase(
   process.env.GEOSCAN_DB || path.join(ROOT, "data", "geoscan.db"),
 );
