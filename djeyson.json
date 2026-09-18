@@ -1,0 +1,57 @@
+
+[
+  {
+    "id": 1,
+    "start_coords": [37.892015, 55.670110],
+    "end_coords": [37.915050, 55.670110],
+    "altitude": 150,
+    "speed": 16.0,
+    "survey_type": "RGB",
+    "length": 1450.5
+  },
+  {
+    "id": 2,
+    "start_coords": [37.892015, 55.669660],
+    "end_coords": [37.915050, 55.669660],
+    "altitude": 150,
+    "speed": 16.0,
+    "survey_type": "RGB",
+    "length": 1450.5
+  },
+  {
+    "id": 3,
+    "start_coords": [37.892015, 55.669210],
+    "end_coords": [37.915050, 55.669210],
+    "altitude": 150,
+    "speed": 16.0,
+    "survey_type": "RGB",
+    "length": 1450.5
+  },
+  {
+    "id": 4,
+    "start_coords": [37.892015, 55.668760],
+    "end_coords": [37.913010, 55.668760],
+    "altitude": 100,
+    "speed": 10.0,
+    "survey_type": "LiDAR",
+    "length": 1318.2
+  },
+  {
+    "id": 5,
+    "start_coords": [37.892015, 55.668310],
+    "end_coords": [37.912550, 55.668310],
+    "altitude": 100,
+    "speed": 10.0,
+    "survey_type": "LiDAR",
+    "length": 1289.4
+  },
+  {
+    "id": 6,
+    "start_coords": [37.892015, 55.667860],
+    "end_coords": [37.911850, 55.667860],
+    "altitude": 100,
+    "speed": 10.0,
+    "survey_type": "LiDAR",
+    "length": 1245.0
+  }
+]
