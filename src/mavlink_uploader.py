@@ -6,6 +6,9 @@ import sys
 import time
 from typing import Any
 
+from .constants import DEFAULT_CAMERA_TRIGGER_DISTANCE_M
+from .schemas import MavlinkMissionRequest
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -52,7 +55,13 @@ def _mission_item(
     }
 
 
-def build_mission_items(waypoints_list: list[list[list[float]]], home: list[float], altitude_m: float, transit_altitude_m: float) -> list[dict[str, Any]]:
+def build_mission_items(
+    waypoints_list: list[list[list[float]]],
+    home: list[float],
+    altitude_m: float,
+    transit_altitude_m: float,
+    camera_trigger_distance_m: float = DEFAULT_CAMERA_TRIGGER_DISTANCE_M,
+) -> list[dict[str, Any]]:
     """Create an uploadable mission with transit altitude and camera trigger boundaries."""
     if len(home) != 2:
         raise MavlinkUploadError("Для LIVE START нужна домашняя площадка БВС.")
@@ -69,7 +78,7 @@ def build_mission_items(waypoints_list: list[list[list[float]]], home: list[floa
         if len(segment) < 2:
             continue
         # Start and stop camera triggering around each assigned survey line.
-        items.append(_mission_item(sequence, mavutil.mavlink.MAV_CMD_DO_SET_CAM_TRIGG_DIST, 0.0, 0.0, 0.0, param1=1.0))
+        items.append(_mission_item(sequence, mavutil.mavlink.MAV_CMD_DO_SET_CAM_TRIGG_DIST, 0.0, 0.0, 0.0, param1=camera_trigger_distance_m))
         sequence += 1
         for latitude, longitude in segment:
             items.append(_mission_item(sequence, mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, float(latitude), float(longitude), altitude_m))
@@ -80,7 +89,7 @@ def build_mission_items(waypoints_list: list[list[list[float]]], home: list[floa
     return items
 
 
-def _upload_and_start_sync(mav_connection_str: str, waypoints_list: list[list[list[float]]], home: list[float], altitude_m: float, transit_altitude_m: float, timeout_seconds: float, auto_mode: int) -> dict[str, Any]:
+def _upload_and_start_sync(mav_connection_str: str, waypoints_list: list[list[list[float]]], home: list[float], altitude_m: float, transit_altitude_m: float, timeout_seconds: float, auto_mode: int, camera_trigger_distance_m: float) -> dict[str, Any]:
     if mavutil is None:
         raise MavlinkUploadError("pymavlink не установлен. Выполните: pip install pymavlink")
 
@@ -89,7 +98,7 @@ def _upload_and_start_sync(mav_connection_str: str, waypoints_list: list[list[li
         heartbeat = _wait_message(connection, ["HEARTBEAT"], timeout_seconds)
         target_system = heartbeat.get_srcSystem()
         target_component = heartbeat.get_srcComponent()
-        items = build_mission_items(waypoints_list, home, altitude_m, transit_altitude_m)
+        items = build_mission_items(waypoints_list, home, altitude_m, transit_altitude_m, camera_trigger_distance_m)
 
         connection.mav.mission_clear_all_send(target_system, target_component, mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
         _wait_message(connection, ["MISSION_ACK"], timeout_seconds)
@@ -130,23 +139,25 @@ def _upload_and_start_sync(mav_connection_str: str, waypoints_list: list[list[li
         connection.close()
 
 
-async def upload_and_start_mission(mav_connection_str: str, waypoints_list: list[list[list[float]]], home: list[float], altitude_m: float = 120.0, transit_altitude_m: float = 50.0, timeout_seconds: float = 10.0, auto_mode: int = 3) -> dict[str, Any]:
+async def upload_and_start_mission(request: MavlinkMissionRequest) -> dict[str, Any]:
     """Wait for a controller, upload mission items, select AUTO and arm the vehicle."""
-    return await asyncio.to_thread(_upload_and_start_sync, mav_connection_str, waypoints_list, home, altitude_m, transit_altitude_m, timeout_seconds, auto_mode)
+    return await asyncio.to_thread(
+        _upload_and_start_sync,
+        request.connection,
+        request.segments,
+        request.home,
+        request.altitudeM,
+        request.transitAltitudeM,
+        request.timeoutSeconds,
+        request.autoMode,
+        request.cameraTriggerDistanceM,
+    )
 
 
 async def main() -> None:
     try:
-        payload = json.loads(sys.stdin.read() or "{}")
-        result = await upload_and_start_mission(
-            payload.get("connection", "udp:127.0.0.1:14550"),
-            payload.get("segments", []),
-            payload.get("home", []),
-            float(payload.get("altitudeM", 120)),
-            float(payload.get("transitAltitudeM", 50)),
-            float(payload.get("timeoutSeconds", 10)),
-            int(payload.get("autoMode", 3)),
-        )
+        payload = MavlinkMissionRequest.model_validate(json.loads(sys.stdin.read() or "{}"))
+        result = await upload_and_start_mission(payload)
         print(json.dumps(result))
     except Exception as error:
         print(json.dumps({"errors": [str(error)]}, ensure_ascii=False))

@@ -32,15 +32,24 @@ class TrackSlicer:
             )
             tracks.extend(self._extract_lines(polygon.intersection(sweep_line)))
             current_y += spacing_m
-        return tracks
+
+        return sorted(
+            tracks,
+            key=lambda track: (round(track.centroid.y, 6), track.centroid.x),
+        )
 
     def _extract_lines(self, geometry: base.BaseGeometry) -> list[LineString]:
         """Рекурсивно распаковывает LineString из Shapely-результата."""
         if isinstance(geometry, LineString):
-            return [geometry] if geometry.length > self.min_segment_length_m else []
+            if geometry.length <= self.min_segment_length_m:
+                return []
+            start, end = geometry.coords[0], geometry.coords[-1]
+            if start[0] <= end[0]:
+                return [geometry]
+            return [LineString(list(geometry.coords)[::-1])]
         if isinstance(geometry, (MultiLineString, GeometryCollection)):
             lines: list[LineString] = []
             for part in geometry.geoms:
                 lines.extend(self._extract_lines(part))
-            return lines
+            return sorted(lines, key=lambda line: (line.centroid.x, line.length))
         return []

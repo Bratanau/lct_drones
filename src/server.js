@@ -1,13 +1,17 @@
 const fs = require("node:fs/promises");
 const crypto = require("node:crypto");
-const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { openDatabase, parse, listRows } = require("./database");
+const { missionPlannerWpl } = require("./exporters/qgc-wpl");
+const {
+  allocateRoutes: runPythonAllocator,
+  planMission: runPythonPlanner,
+  uploadMavlinkMission: runMavlinkUploader,
+} = require("./services/python-worker");
 
 const ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.join(__dirname, "public");
-const PYTHON_BIN = process.env.PYTHON_BIN || "python";
 const PORT = Number(process.env.GEOSCAN_PORT || 4173);
 const db = openDatabase(
   process.env.GEOSCAN_DB || path.join(ROOT, "data", "geoscan.db"),
@@ -47,114 +51,6 @@ function send(response, status, data, headers = {}) {
     ...headers,
   });
   response.end(data === undefined ? "" : JSON.stringify(data));
-}
-function runMavlinkUploader(input) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON_BIN, ["-m", "src.mavlink_uploader"], {
-      cwd: ROOT,
-      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(
-      () => {
-        child.kill();
-        reject(
-          new Error("Таймаут MAVLink: симулятор или контроллер не ответил."),
-        );
-      },
-      (Number(input.timeoutSeconds) || 10) * 1000 + 5000,
-    );
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      try {
-        const result = JSON.parse(stdout || "{}");
-        if (code === 0 && !result.errors) resolve(result);
-        else
-          reject(
-            new Error(
-              result.errors?.join(" ") || stderr || "MAVLink uploader failed.",
-            ),
-          );
-      } catch (_) {
-        reject(new Error(stderr || "MAVLink uploader returned invalid JSON."));
-      }
-    });
-    child.stdin.end(JSON.stringify(input));
-  });
-}
-function runPythonPlanner(input, selectedPlatform) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON_BIN, ["-m", "src.geometry.service"], {
-      cwd: ROOT,
-      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-      if (stdout.length > 5 * 1024 * 1024) child.kill();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.once("error", (error) => reject(error));
-    child.once("close", (code) => {
-      try {
-        const result = JSON.parse(stdout);
-        if (code === 0 || result.errors) resolve(result);
-        else reject(new Error(result.errors.join(" ")));
-      } catch (_) {
-        reject(new Error(stderr || "Python planner returned invalid JSON."));
-      }
-    });
-    child.stdin.end(JSON.stringify({ ...input, platform: selectedPlatform }));
-  });
-}
-function runPythonAllocator(input) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON_BIN, ["-m", "src.route_optimizer"], {
-      cwd: ROOT,
-      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error("Таймаут OR-Tools solver."));
-    }, 8000);
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      try {
-        const result = JSON.parse(stdout || "{}");
-        if (code === 0 && !result.errors) resolve(result);
-        else
-          reject(
-            new Error(
-              result.errors?.join(" ") || stderr || "OR-Tools solver failed.",
-            ),
-          );
-      } catch (_) {
-        reject(new Error(stderr || "OR-Tools solver returned invalid JSON."));
-      }
-    });
-    child.stdin.end(JSON.stringify(input));
-  });
 }
 function normalizePlatformInput(input) {
   const numericFields = [
@@ -282,163 +178,6 @@ function deleteFleetUnit(id) {
   const result = db.prepare("DELETE FROM fleet_units WHERE id=?").run(id);
   return result.changes ? { ok: true } : { errors: ["БВС флота не найден."] };
 }
-function distanceM(first, second) {
-  const radius = 6371000;
-  const radians = Math.PI / 180;
-  const dLat = (second[0] - first[0]) * radians;
-  const dLng = (second[1] - first[1]) * radians;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(first[0] * radians) *
-      Math.cos(second[0] * radians) *
-      Math.sin(dLng / 2) ** 2;
-  return 2 * radius * Math.asin(Math.sqrt(a));
-}
-function allocateRoutes(plan, units) {
-  if (!Array.isArray(plan.segments) || !plan.segments.length)
-    return { errors: ["Не переданы галсы для распределения."] };
-  const candidates = units
-    .filter((unit) => {
-      const required = plan.mode === "lidar" ? "lidar" : null;
-      return (
-        Number(unit.platform?.maxSpeedMS || 0) > 0 &&
-        (!required ||
-          unit.payloads.some((payload) => payload.toLowerCase() === required))
-      );
-    })
-    .map((unit) => ({
-      uavId: unit.id,
-      name: unit.name,
-      home: [unit.homeLat, unit.homeLng],
-      platform: unit.platform,
-      pending: [],
-      assignedSeconds: 0,
-      warnings: [],
-    }));
-  if (!candidates.length)
-    return { errors: ["Нет БВС с подходящей полезной нагрузкой."] };
-
-  const unassigned = [];
-  for (const [index, segment] of plan.segments.entries()) {
-    const midpoint = [
-      (segment[0][0] + segment[1][0]) / 2,
-      (segment[0][1] + segment[1][1]) / 2,
-    ];
-    const length = distanceM(segment[0], segment[1]);
-    const ranked = candidates
-      .map((candidate) => {
-        const speed = Number(candidate.platform.maxSpeedMS);
-        const roundTrip = distanceM(candidate.home, midpoint) * 2 + length;
-        const usableSeconds =
-          Number(candidate.platform.flightMinutes || 0) *
-          60 *
-          (1 - Number(candidate.platform.reservePercent || 20) / 100);
-        return {
-          candidate,
-          costSeconds: roundTrip / speed,
-          usableSeconds,
-          distanceToHome: distanceM(candidate.home, midpoint),
-        };
-      })
-      .sort((first, second) => first.distanceToHome - second.distanceToHome);
-    const selected = ranked.find(
-      (item) =>
-        item.candidate.assignedSeconds + item.costSeconds <= item.usableSeconds,
-    );
-    if (!selected) {
-      unassigned.push(index);
-      continue;
-    }
-    selected.candidate.pending.push({ segment, index });
-    selected.candidate.assignedSeconds += selected.costSeconds;
-  }
-
-  const allocations = candidates.map((candidate) => {
-    const remaining = [...candidate.pending];
-    const trajectory = [[...candidate.home]];
-    const surveySegments = [];
-    let position = candidate.home;
-    while (remaining.length) {
-      let bestIndex = 0;
-      let reverse = false;
-      let bestDistance = Infinity;
-      remaining.forEach((task, index) => {
-        const toStart = distanceM(position, task.segment[0]);
-        const toEnd = distanceM(position, task.segment[1]);
-        if (toStart < bestDistance) {
-          bestIndex = index;
-          reverse = false;
-          bestDistance = toStart;
-        }
-        if (toEnd < bestDistance) {
-          bestIndex = index;
-          reverse = true;
-          bestDistance = toEnd;
-        }
-      });
-      const task = remaining.splice(bestIndex, 1)[0];
-      const oriented = reverse
-        ? [task.segment[1], task.segment[0]]
-        : task.segment;
-      trajectory.push([...oriented[0]], [...oriented[1]]);
-      surveySegments.push(oriented);
-      position = oriented[1];
-    }
-    if (surveySegments.length) trajectory.push([...candidate.home]);
-    const distance = trajectory
-      .slice(1)
-      .reduce(
-        (total, point, index) => total + distanceM(trajectory[index], point),
-        0,
-      );
-    const speed = Number(candidate.platform.maxSpeedMS || 1);
-    const usableSeconds =
-      Number(candidate.platform.flightMinutes || 0) *
-      60 *
-      (1 - Number(candidate.platform.reservePercent || 20) / 100);
-    if (distance / speed > usableSeconds)
-      candidate.warnings.push(
-        "Непрерывный маршрут превышает доступную автономность.",
-      );
-    return {
-      uav_id: candidate.uavId,
-      uavId: candidate.uavId,
-      name: candidate.name,
-      home: candidate.home,
-      flight_trajectory_lonlat: trajectory.map(([lat, lng]) => [lng, lat]),
-      flightTrajectory: trajectory,
-      surveySegments,
-      segments: surveySegments,
-      stats: {
-        flight_time_m: Math.ceil(distance / speed / 60),
-        distance_m: Math.round(distance),
-      },
-      distanceM: Math.round(distance),
-      estimatedSeconds: Math.ceil(distance / speed),
-      warnings: candidate.warnings,
-    };
-  });
-  return { allocations, assignments: allocations, unassigned };
-}
-function missionPlannerWpl(assignment, altitude = 120) {
-  const lines = ["QGC WPL 110"];
-  let sequence = 0;
-  const [homeLat, homeLng] = assignment.home;
-  lines.push(
-    `${sequence++}\t1\t3\t16\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLng.toFixed(7)}\t${Number(altitude).toFixed(2)}\t1`,
-  );
-  for (const segment of assignment.segments) {
-    for (const point of segment)
-      lines.push(
-        `${sequence++}\t0\t3\t16\t0\t0\t0\t0\t${point[0].toFixed(7)}\t${point[1].toFixed(7)}\t${Number(altitude).toFixed(2)}\t1`,
-      );
-  }
-  lines.push(
-    `${sequence}\t0\t3\t21\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLng.toFixed(7)}\t${Number(altitude).toFixed(2)}\t1`,
-  );
-  return lines.join("\n");
-}
-
 function missionFromRow(row) {
   const record = parse(row);
   return {
@@ -726,10 +465,14 @@ async function api(request, response, url) {
         .map(missionFromRow),
     );
   if (!id && request.method === "POST") {
-    const saved = await saveMission(await body(request));
-    return saved.errors
-      ? send(response, 422, saved)
-      : send(response, 201, saved.mission);
+    try {
+      const saved = await saveMission(await body(request));
+      return saved.errors
+        ? send(response, 422, saved)
+        : send(response, 201, saved.mission);
+    } catch (error) {
+      return send(response, 422, { errors: [error.message] });
+    }
   }
   const row = db.prepare("SELECT * FROM missions WHERE id=?").get(id);
   if (!row) return send(response, 404, { error: "Миссия не найдена." });
@@ -790,10 +533,14 @@ async function api(request, response, url) {
   }
   if (request.method === "GET") return send(response, 200, mission);
   if (request.method === "PUT") {
-    const saved = await saveMission(await body(request), row);
-    return saved.errors
-      ? send(response, 422, saved)
-      : send(response, 200, saved.mission);
+    try {
+      const saved = await saveMission(await body(request), row);
+      return saved.errors
+        ? send(response, 422, saved)
+        : send(response, 200, saved.mission);
+    } catch (error) {
+      return send(response, 422, { errors: [error.message] });
+    }
   }
   if (request.method === "DELETE") {
     db.prepare("DELETE FROM mission_versions WHERE mission_id=?").run(id);

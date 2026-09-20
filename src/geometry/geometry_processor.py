@@ -121,11 +121,6 @@ class FlightPlannerGeometry:
             )
         return polygon
 
-    @staticmethod
-    def _longest_edge_angle(polygon: Polygon) -> float:
-        """Backward-compatible alias for the public sweep-angle helper."""
-        return get_optimal_sweep_angle(polygon)
-
     def _format_track(
         self,
         track,

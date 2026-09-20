@@ -93,6 +93,18 @@
             Кнопка добавления включает режим: кликните по карте, чтобы задать
             домашнюю площадку БВС.
           </p>
+          <label
+            >Алгоритм распределения<select id="allocationAlgorithm">
+              <option value="contiguous">Непрерывные блоки</option>
+              <option value="nearest_home">Ближайший home</option>
+              <option value="cvrp">CVRP / OR-Tools</option>
+            </select></label
+          >
+          <div
+            id="allocationAlgorithmInfo"
+            class="platform-info"
+            aria-live="polite"
+          ></div>
           <div id="fleetList" class="fleet-list"></div>
         </section>
         <section class="panel-block">
@@ -146,6 +158,17 @@
               <option value="lidar">LiDAR</option>
             </select></label
           >
+          <label
+            >Алгоритм траектории<select id="trajectoryAlgorithm">
+              <option value="sweep">Параллельные галсы</option>
+              <option value="contour">Контурные проходы</option>
+            </select></label
+          >
+          <div
+            id="trajectoryAlgorithmInfo"
+            class="platform-info"
+            aria-live="polite"
+          ></div>
           <div class="two-fields">
             <label
               >Высота, м<input
@@ -442,6 +465,7 @@
     <div id="toast" role="status" aria-live="polite"></div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="api.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

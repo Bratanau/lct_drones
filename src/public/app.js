@@ -25,6 +25,7 @@ let fleetMarkers = new Map();
 let allocationLayer = null;
 let placementMode = false;
 let lastPlan = null;
+let toastTimer = null;
 
 map.addControl(
   new L.Control.Draw({
@@ -74,7 +75,19 @@ document.querySelectorAll("[data-mode]").forEach((button) =>
     saveMission();
   }),
 );
-document.getElementById("fileInput").addEventListener("change", importFile);
+document
+  .getElementById("trajectoryAlgorithm")
+  .addEventListener("change", () => {
+    updateTrajectoryAlgorithmInfo();
+    if (boundary) planRoute();
+    saveMission();
+  });
+document
+  .getElementById("allocationAlgorithm")
+  .addEventListener("change", () => {
+    updateAllocationAlgorithmInfo();
+    saveMission();
+  });
 document
   .getElementById("missionSelect")
   .addEventListener("change", (event) =>
@@ -138,6 +151,8 @@ document
   .querySelector(".mission-title input")
   .addEventListener("change", saveMission);
 loadMission();
+updateTrajectoryAlgorithmInfo();
+updateAllocationAlgorithmInfo();
 loadServerData();
 loadFleet();
 
@@ -158,7 +173,9 @@ function clearMission() {
   boundary = null;
   routeSegments = [];
   if (routeLayer) map.removeLayer(routeLayer);
+  if (allocationLayer) map.removeLayer(allocationLayer);
   routeLayer = null;
+  allocationLayer = null;
   document.getElementById("emptyState").hidden = false;
   document.getElementById("areaLabel").textContent = "0 га";
   ["summaryArea", "routeLength", "flightTime", "lineCount"].forEach(
@@ -175,7 +192,7 @@ async function planRoute() {
   const payload = missionPayload();
   setSaved("Расчёт на сервере...");
   try {
-    const response = await fetch(
+    const response = await Api.request(
       missionId ? `/api/missions/${missionId}` : "/api/missions",
       {
         method: missionId ? "PUT" : "POST",
@@ -309,6 +326,8 @@ function missionPayload() {
     "speed",
     "frontOverlap",
     "sideOverlap",
+    "trajectoryAlgorithm",
+    "allocationAlgorithm",
   ].reduce(
     (result, id) => ({ ...result, [id]: document.getElementById(id).value }),
     {},
@@ -330,6 +349,8 @@ function saveMission() {
     "speed",
     "frontOverlap",
     "sideOverlap",
+    "trajectoryAlgorithm",
+    "allocationAlgorithm",
   ].reduce(
     (result, id) => ({ ...result, [id]: document.getElementById(id).value }),
     {},
@@ -389,7 +410,7 @@ async function addPlatform(event) {
   const form = event.currentTarget;
   const input = Object.fromEntries(new FormData(form));
   try {
-    const response = await fetch("/api/platforms", {
+    const response = await Api.request("/api/platforms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -457,7 +478,7 @@ async function deleteSelectedPlatform() {
   const platform = selectedPlatform();
   if (!platform?.userDefined) return showToast("Системные БВС нельзя удалить");
   if (!window.confirm(`Удалить БВС «${platform.name}»?`)) return;
-  const response = await fetch(`/api/platforms/${platform.id}`, {
+  const response = await Api.request(`/api/platforms/${platform.id}`, {
     method: "DELETE",
   });
   const result = await response.json();
@@ -481,7 +502,7 @@ async function addFleetUnitAt(latlng) {
   if (!name) return;
   const platformId = document.getElementById("platformSelect").value;
   const payloadText = window.prompt("Полезные нагрузки через запятую", "RGB");
-  const response = await fetch("/api/fleet", {
+  const response = await Api.request("/api/fleet", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -539,13 +560,13 @@ function renderFleet() {
   }
 }
 async function loadFleet() {
-  const response = await fetch("/api/fleet");
+  const response = await Api.request("/api/fleet");
   if (!response.ok) return;
   fleetUnits = await response.json();
   renderFleet();
 }
 async function deleteFleetUnit(id) {
-  const response = await fetch(`/api/fleet/${id}`, { method: "DELETE" });
+  const response = await Api.request(`/api/fleet/${id}`, { method: "DELETE" });
   if (!response.ok) return showToast("Не удалось удалить БВС из флота");
   fleetMarkers.get(id)?.remove();
   fleetMarkers.delete(id);
@@ -555,11 +576,16 @@ async function deleteFleetUnit(id) {
 async function allocateFleet() {
   if (!routeSegments.length) return showToast("Сначала постройте маршрут");
   if (!fleetUnits.length) return showToast("Добавьте БВС на карту");
-  const response = await fetch("/api/fleet/allocate", {
+  const response = await Api.request("/api/fleet/allocate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      plan: { ...lastPlan, segments: routeSegments },
+      plan: {
+        ...lastPlan,
+        segments: routeSegments,
+        allocationAlgorithm: document.getElementById("allocationAlgorithm")
+          .value,
+      },
       fleetIds: fleetUnits.map((unit) => unit.id),
     }),
   });
@@ -570,11 +596,27 @@ async function allocateFleet() {
     );
   renderAllocation(result);
 }
+function normalizeAllocation(allocation) {
+  return {
+    ...allocation,
+    uavId: allocation.uav_id,
+    home: allocation.home_lonlat.slice().reverse(),
+    flightTrajectory: allocation.flight_trajectory_lonlat.map(([lng, lat]) => [
+      lat,
+      lng,
+    ]),
+    segments: allocation.survey_segments_lonlat.map((segment) =>
+      segment.map(([lng, lat]) => [lat, lng]),
+    ),
+  };
+}
+
 function renderAllocation(result) {
   if (allocationLayer) map.removeLayer(allocationLayer);
+  const allocations = result.allocations.map(normalizeAllocation);
   const colors = ["#115f9e", "#008b72", "#bd5b18", "#7a4fa3", "#b22d58"];
   allocationLayer = L.featureGroup();
-  result.allocations.forEach((allocation, index) => {
+  allocations.forEach((allocation, index) => {
     const color = colors[index % colors.length];
     L.polyline(allocation.flightTrajectory, {
       color,
@@ -585,7 +627,7 @@ function renderAllocation(result) {
     allocation.color = color;
   });
   allocationLayer.addTo(map);
-  document.getElementById("fleetList").innerHTML = result.allocations
+  document.getElementById("fleetList").innerHTML = allocations
     .map(
       (allocation, index) =>
         `<div class="fleet-item"><span class="fleet-color" style="background:${colors[index % colors.length]}"></span><div><strong>${escapeHtml(allocation.name)}</strong><small>${allocation.segments.length} галсов · ${(allocation.stats.distance_m / 1000).toFixed(2)} км · ${allocation.stats.flight_time_m} мин</small></div><button class="small-button export-fleet" data-uav-id="${allocation.uavId}" type="button">WPL</button><button class="small-button live-start" data-uav-id="${allocation.uavId}" type="button">LIVE START</button></div>`,
@@ -596,7 +638,7 @@ function renderAllocation(result) {
     .forEach((button) =>
       button.addEventListener("click", () =>
         exportFleetWpl(
-          result.allocations.find(
+          allocations.find(
             (allocation) => allocation.uavId === button.dataset.uavId,
           ),
         ),
@@ -607,7 +649,7 @@ function renderAllocation(result) {
     .forEach((button) =>
       button.addEventListener("click", () =>
         liveStart(
-          result.allocations.find(
+          allocations.find(
             (allocation) => allocation.uavId === button.dataset.uavId,
           ),
         ),
@@ -626,7 +668,7 @@ async function liveStart(assignment) {
     )
   )
     return;
-  const response = await fetch("/api/fleet/live-start", {
+  const response = await Api.request("/api/fleet/live-start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -646,7 +688,7 @@ async function liveStart(assignment) {
   );
 }
 async function exportFleetWpl(assignment) {
-  const response = await fetch("/api/fleet/export-wpl", {
+  const response = await Api.request("/api/fleet/export-wpl", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -665,8 +707,8 @@ async function exportFleetWpl(assignment) {
 async function loadServerData() {
   try {
     const [missionsResponse, platformsResponse] = await Promise.all([
-      fetch("/api/missions"),
-      fetch("/api/platforms"),
+      Api.request("/api/missions"),
+      Api.request("/api/platforms"),
     ]);
     if (!missionsResponse.ok || !platformsResponse.ok)
       throw new Error("API недоступен");
@@ -694,6 +736,7 @@ async function loadServerData() {
     if (platforms.some((platform) => platform.id === "test-quad-mini"))
       platformSelect.value = "test-quad-mini";
     updatePlatformInfo();
+    updateTrajectoryAlgorithmInfo();
     if (missionId && missions.some((mission) => mission.id === missionId)) {
       missionSelect.value = missionId;
       await openMission(missionId);
@@ -717,9 +760,27 @@ function updatePlatformInfo() {
   }
   info.innerHTML = `<strong>${escapeHtml(selected.category || "БВС")}</strong><span>${escapeHtml(selected.description || "")}</span><small>${selected.maxRangeM / 1000} км · до ${selected.maxSpeedMS} м/с · ${selected.flightMinutes} мин</small>`;
 }
+function updateAllocationAlgorithmInfo() {
+  const algorithm = document.getElementById("allocationAlgorithm").value;
+  document.getElementById("allocationAlgorithmInfo").textContent =
+    algorithm === "nearest_home"
+      ? "Минимальный перегон до ближайшей домашней площадки; зоны могут перемешиваться."
+      : algorithm === "cvrp"
+        ? "OR-Tools оптимизирует переходы; непрерывность зон не гарантируется."
+        : "Непрерывные блоки галсов; лучше для совместной съемки без пересечений.\n";
+}
+
+function updateTrajectoryAlgorithmInfo() {
+  const algorithm = document.getElementById("trajectoryAlgorithm").value;
+  document.getElementById("trajectoryAlgorithmInfo").innerHTML =
+    algorithm === "contour"
+      ? "Контурные проходы: следуют внутренним границам, но дают больше разворотов и обычно требуют больше времени."
+      : "Параллельные галсы: равномерное покрытие и минимальные переходы для площадной съемки.";
+}
+
 async function openMission(id) {
   try {
-    const response = await fetch(`/api/missions/${id}`);
+    const response = await Api.request(`/api/missions/${id}`);
     if (!response.ok) throw new Error("Миссия не найдена");
     const mission = await response.json();
     missionId = mission.id;
@@ -732,6 +793,8 @@ async function openMission(id) {
       const element = document.getElementById(key);
       if (element) element.value = value;
     });
+    updateTrajectoryAlgorithmInfo();
+    updateAllocationAlgorithmInfo();
     document
       .querySelectorAll("[data-mode]")
       .forEach((button) =>
@@ -759,7 +822,7 @@ function newMission() {
 async function duplicateMission() {
   if (!missionId) return showToast("Сначала сохраните миссию");
   try {
-    const response = await fetch(`/api/missions/${missionId}/duplicate`, {
+    const response = await Api.request(`/api/missions/${missionId}/duplicate`, {
       method: "POST",
     });
     const mission = await response.json();

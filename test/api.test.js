@@ -143,13 +143,21 @@ test("stores fleet home, allocates segments and exports Mission Planner WPL", as
   });
   assert.equal(allocation.status, 200);
   const result = await allocation.json();
-  assert.equal(result.assignments[0].segments.length, 2);
-  assert.equal(result.assignments[0].flightTrajectory[0][0], 55.77);
-  assert.equal(result.assignments[0].flightTrajectory.at(-1)[0], 55.77);
+  const assignment = result.allocations[0];
+  assert.equal(assignment.survey_segments_lonlat.length, 2);
+  assert.equal(assignment.flight_trajectory_lonlat[0][1], 55.77);
+  assert.equal(assignment.flight_trajectory_lonlat.at(-1)[1], 55.77);
+  const wplAssignment = {
+    uavId: assignment.uav_id,
+    home: assignment.home_lonlat.slice().reverse(),
+    segments: assignment.survey_segments_lonlat.map((segment) =>
+      segment.map(([lng, lat]) => [lat, lng]),
+    ),
+  };
   const wpl = await fetch(`${baseUrl}/api/fleet/export-wpl`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ assignment: result.assignments[0], altitude: 120 }),
+    body: JSON.stringify({ assignment: wplAssignment, altitude: 120 }),
   });
   assert.equal(wpl.status, 200);
   assert.match(await wpl.text(), /QGC WPL 110/);

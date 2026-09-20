@@ -1,5 +1,7 @@
 """Сервисный JSON-контракт для расчета миссии на Python."""
 
+
+
 from __future__ import annotations
 
 import json
@@ -7,7 +9,7 @@ import math
 import sys
 from typing import Any
 
-from shapely.geometry import LineString, Point, Polygon, shape
+from shapely.geometry import LineString, Point, Polygon, MultiPolygon, shape
 
 from .geometry_processor import FlightPlannerGeometry
 from .models import GeometryProcessorError
@@ -27,6 +29,9 @@ def plan_mission(payload: dict[str, Any]) -> dict[str, Any]:
     sensor = settings.get("sensor")
     if sensor not in SENSOR_SWATH_FACTORS:
         return {"errors": ["Укажите поддерживаемый сенсор."]}
+    algorithm = settings.get("trajectoryAlgorithm", "sweep")
+    if algorithm not in {"sweep", "contour"}:
+        return {"errors": ["Укажите поддерживаемый алгоритм траектории."]}
 
     altitude = _number(settings.get("altitude"))
     speed = _number(settings.get("speed"))
@@ -56,6 +61,9 @@ def plan_mission(payload: dict[str, Any]) -> dict[str, Any]:
         spacing = max(5.0, altitude * SENSOR_SWATH_FACTORS[sensor] * (1 - side_overlap / 100))
         if mode == "inspection":
             segments, points = _inspection_plan(polygon_utm, projection, spacing)
+        elif algorithm == "contour":
+            segments = _contour_plan(polygon_utm, projection, spacing)
+            points = []
         else:
             tracks = FlightPlannerGeometry().process(_coordinates(geometry), spacing)
             segments = [
@@ -79,6 +87,7 @@ def plan_mission(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "plan": {
             "mode": mode,
+            "trajectoryAlgorithm": algorithm,
             "orientationDegrees": angle,
             "spacingM": round(spacing, 1),
             "areaM2": round(area_m2, 1),
@@ -114,6 +123,42 @@ def _input_geometry(payload: dict[str, Any]) -> Polygon | LineString:
 
 def _coordinates(polygon: Polygon) -> list[list[float]]:
     return [[longitude, latitude] for longitude, latitude in polygon.exterior.coords]
+
+
+def _contour_plan(
+    polygon: Polygon, projection: Any, spacing: float
+) -> list[list[list[float]]]:
+    """Build inward offset rings and expose their edges as [lat, lon] segments."""
+    segments: list[list[list[float]]] = []
+    current = polygon
+    max_rings = max(1, math.ceil(max(polygon.bounds[2] - polygon.bounds[0], polygon.bounds[3] - polygon.bounds[1]) / spacing))
+    for _ in range(max_rings):
+        geometries = current.geoms if isinstance(current, MultiPolygon) else [current]
+        added = 0
+        for geometry in geometries:
+            if not isinstance(geometry, Polygon) or geometry.is_empty:
+                continue
+            rings = [geometry.exterior, *geometry.interiors]
+            for ring in rings:
+                coordinates = list(ring.coords)
+                for first, second in zip(coordinates, coordinates[1:]):
+                    if math.hypot(second[0] - first[0], second[1] - first[1]) <= 0.01:
+                        continue
+                    first_lng, first_lat = projection.inverse.transform(*first)
+                    second_lng, second_lat = projection.inverse.transform(*second)
+                    segments.append(
+                        [
+                            [round(first_lat, 6), round(first_lng, 6)],
+                            [round(second_lat, 6), round(second_lng, 6)],
+                        ]
+                    )
+                    added += 1
+        if not added:
+            break
+        current = current.buffer(-spacing)
+        if current.is_empty:
+            break
+    return segments
 
 
 def _inspection_plan(polygon: Polygon, projection: Any, spacing: float) -> tuple[list[list[list[float]]], list[list[float]]]:
