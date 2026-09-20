@@ -235,6 +235,62 @@ input[type="file"] {
 .mission-tools > select {
   width: 100%;
 }
+#map.placing-fleet {
+  cursor: crosshair;
+}
+.fleet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.fleet-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.fleet-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px;
+  background: #f1f6f5;
+  border-left: 3px solid var(--teal);
+}
+.fleet-item > div {
+  min-width: 0;
+  flex: 1;
+}
+.fleet-item strong,
+.fleet-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fleet-item strong {
+  font-size: 11px;
+}
+.fleet-item small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.fleet-dot,
+.fleet-color {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--orange);
+}
+.live-start {
+  color: #fff;
+  border-color: #b34b2f;
+  background: #b34b2f;
+}
+.live-start:hover {
+  background: #8e351f;
+}
 .platform-actions {
   display: flex;
   gap: 6px;

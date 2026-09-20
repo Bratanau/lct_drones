@@ -48,6 +48,48 @@ function send(response, status, data, headers = {}) {
   });
   response.end(data === undefined ? "" : JSON.stringify(data));
 }
+function runMavlinkUploader(input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, ["-m", "src.mavlink_uploader"], {
+      cwd: ROOT,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(
+      () => {
+        child.kill();
+        reject(
+          new Error("Таймаут MAVLink: симулятор или контроллер не ответил."),
+        );
+      },
+      (Number(input.timeoutSeconds) || 10) * 1000 + 5000,
+    );
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      try {
+        const result = JSON.parse(stdout || "{}");
+        if (code === 0 && !result.errors) resolve(result);
+        else
+          reject(
+            new Error(
+              result.errors?.join(" ") || stderr || "MAVLink uploader failed.",
+            ),
+          );
+      } catch (_) {
+        reject(new Error(stderr || "MAVLink uploader returned invalid JSON."));
+      }
+    });
+    child.stdin.end(JSON.stringify(input));
+  });
+}
 function runPythonPlanner(input, selectedPlatform) {
   return new Promise((resolve, reject) => {
     const child = spawn(PYTHON_BIN, ["-m", "src.geometry.service"], {
@@ -75,6 +117,43 @@ function runPythonPlanner(input, selectedPlatform) {
       }
     });
     child.stdin.end(JSON.stringify({ ...input, platform: selectedPlatform }));
+  });
+}
+function runPythonAllocator(input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, ["-m", "src.route_optimizer"], {
+      cwd: ROOT,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("Таймаут OR-Tools solver."));
+    }, 8000);
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      try {
+        const result = JSON.parse(stdout || "{}");
+        if (code === 0 && !result.errors) resolve(result);
+        else
+          reject(
+            new Error(
+              result.errors?.join(" ") || stderr || "OR-Tools solver failed.",
+            ),
+          );
+      } catch (_) {
+        reject(new Error(stderr || "OR-Tools solver returned invalid JSON."));
+      }
+    });
+    child.stdin.end(JSON.stringify(input));
   });
 }
 function normalizePlatformInput(input) {
@@ -144,6 +223,222 @@ function platform(id) {
     ? { id: row.id, name: row.name, ...JSON.parse(row.config_json) }
     : null;
 }
+function fleetRows() {
+  return db
+    .prepare("SELECT * FROM fleet_units ORDER BY name")
+    .all()
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      platformId: row.platform_id,
+      homeLat: row.home_lat,
+      homeLng: row.home_lng,
+      payloads: JSON.parse(row.payloads_json),
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      platform: platform(row.platform_id),
+    }));
+}
+function createFleetUnit(input) {
+  const name = String(input.name || "")
+    .trim()
+    .slice(0, 100);
+  const selectedPlatform = platform(input.platformId);
+  const homeLat = Number(input.homeLat);
+  const homeLng = Number(input.homeLng);
+  const payloads = Array.isArray(input.payloads)
+    ? input.payloads.map(String).slice(0, 12)
+    : [];
+  if (!name) return { errors: ["Укажите позывной БВС."] };
+  if (!selectedPlatform) return { errors: ["Платформа БВС не найдена."] };
+  if (
+    !Number.isFinite(homeLat) ||
+    !Number.isFinite(homeLng) ||
+    homeLat < -90 ||
+    homeLat > 90 ||
+    homeLng < -180 ||
+    homeLng > 180
+  )
+    return { errors: ["Координаты стартовой площадки некорректны."] };
+  const id = `uav-${crypto.randomUUID()}`;
+  const timestamp = now();
+  db.prepare(
+    "INSERT INTO fleet_units (id,name,platform_id,home_lat,home_lng,payloads_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+  ).run(
+    id,
+    name,
+    selectedPlatform.id,
+    homeLat,
+    homeLng,
+    JSON.stringify(payloads),
+    input.status || "ready",
+    timestamp,
+    timestamp,
+  );
+  return { unit: fleetRows().find((item) => item.id === id) };
+}
+function deleteFleetUnit(id) {
+  const result = db.prepare("DELETE FROM fleet_units WHERE id=?").run(id);
+  return result.changes ? { ok: true } : { errors: ["БВС флота не найден."] };
+}
+function distanceM(first, second) {
+  const radius = 6371000;
+  const radians = Math.PI / 180;
+  const dLat = (second[0] - first[0]) * radians;
+  const dLng = (second[1] - first[1]) * radians;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(first[0] * radians) *
+      Math.cos(second[0] * radians) *
+      Math.sin(dLng / 2) ** 2;
+  return 2 * radius * Math.asin(Math.sqrt(a));
+}
+function allocateRoutes(plan, units) {
+  if (!Array.isArray(plan.segments) || !plan.segments.length)
+    return { errors: ["Не переданы галсы для распределения."] };
+  const candidates = units
+    .filter((unit) => {
+      const required = plan.mode === "lidar" ? "lidar" : null;
+      return (
+        Number(unit.platform?.maxSpeedMS || 0) > 0 &&
+        (!required ||
+          unit.payloads.some((payload) => payload.toLowerCase() === required))
+      );
+    })
+    .map((unit) => ({
+      uavId: unit.id,
+      name: unit.name,
+      home: [unit.homeLat, unit.homeLng],
+      platform: unit.platform,
+      pending: [],
+      assignedSeconds: 0,
+      warnings: [],
+    }));
+  if (!candidates.length)
+    return { errors: ["Нет БВС с подходящей полезной нагрузкой."] };
+
+  const unassigned = [];
+  for (const [index, segment] of plan.segments.entries()) {
+    const midpoint = [
+      (segment[0][0] + segment[1][0]) / 2,
+      (segment[0][1] + segment[1][1]) / 2,
+    ];
+    const length = distanceM(segment[0], segment[1]);
+    const ranked = candidates
+      .map((candidate) => {
+        const speed = Number(candidate.platform.maxSpeedMS);
+        const roundTrip = distanceM(candidate.home, midpoint) * 2 + length;
+        const usableSeconds =
+          Number(candidate.platform.flightMinutes || 0) *
+          60 *
+          (1 - Number(candidate.platform.reservePercent || 20) / 100);
+        return {
+          candidate,
+          costSeconds: roundTrip / speed,
+          usableSeconds,
+          distanceToHome: distanceM(candidate.home, midpoint),
+        };
+      })
+      .sort((first, second) => first.distanceToHome - second.distanceToHome);
+    const selected = ranked.find(
+      (item) =>
+        item.candidate.assignedSeconds + item.costSeconds <= item.usableSeconds,
+    );
+    if (!selected) {
+      unassigned.push(index);
+      continue;
+    }
+    selected.candidate.pending.push({ segment, index });
+    selected.candidate.assignedSeconds += selected.costSeconds;
+  }
+
+  const allocations = candidates.map((candidate) => {
+    const remaining = [...candidate.pending];
+    const trajectory = [[...candidate.home]];
+    const surveySegments = [];
+    let position = candidate.home;
+    while (remaining.length) {
+      let bestIndex = 0;
+      let reverse = false;
+      let bestDistance = Infinity;
+      remaining.forEach((task, index) => {
+        const toStart = distanceM(position, task.segment[0]);
+        const toEnd = distanceM(position, task.segment[1]);
+        if (toStart < bestDistance) {
+          bestIndex = index;
+          reverse = false;
+          bestDistance = toStart;
+        }
+        if (toEnd < bestDistance) {
+          bestIndex = index;
+          reverse = true;
+          bestDistance = toEnd;
+        }
+      });
+      const task = remaining.splice(bestIndex, 1)[0];
+      const oriented = reverse
+        ? [task.segment[1], task.segment[0]]
+        : task.segment;
+      trajectory.push([...oriented[0]], [...oriented[1]]);
+      surveySegments.push(oriented);
+      position = oriented[1];
+    }
+    if (surveySegments.length) trajectory.push([...candidate.home]);
+    const distance = trajectory
+      .slice(1)
+      .reduce(
+        (total, point, index) => total + distanceM(trajectory[index], point),
+        0,
+      );
+    const speed = Number(candidate.platform.maxSpeedMS || 1);
+    const usableSeconds =
+      Number(candidate.platform.flightMinutes || 0) *
+      60 *
+      (1 - Number(candidate.platform.reservePercent || 20) / 100);
+    if (distance / speed > usableSeconds)
+      candidate.warnings.push(
+        "Непрерывный маршрут превышает доступную автономность.",
+      );
+    return {
+      uav_id: candidate.uavId,
+      uavId: candidate.uavId,
+      name: candidate.name,
+      home: candidate.home,
+      flight_trajectory_lonlat: trajectory.map(([lat, lng]) => [lng, lat]),
+      flightTrajectory: trajectory,
+      surveySegments,
+      segments: surveySegments,
+      stats: {
+        flight_time_m: Math.ceil(distance / speed / 60),
+        distance_m: Math.round(distance),
+      },
+      distanceM: Math.round(distance),
+      estimatedSeconds: Math.ceil(distance / speed),
+      warnings: candidate.warnings,
+    };
+  });
+  return { allocations, assignments: allocations, unassigned };
+}
+function missionPlannerWpl(assignment, altitude = 120) {
+  const lines = ["QGC WPL 110"];
+  let sequence = 0;
+  const [homeLat, homeLng] = assignment.home;
+  lines.push(
+    `${sequence++}\t1\t3\t16\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLng.toFixed(7)}\t${Number(altitude).toFixed(2)}\t1`,
+  );
+  for (const segment of assignment.segments) {
+    for (const point of segment)
+      lines.push(
+        `${sequence++}\t0\t3\t16\t0\t0\t0\t0\t${point[0].toFixed(7)}\t${point[1].toFixed(7)}\t${Number(altitude).toFixed(2)}\t1`,
+      );
+  }
+  lines.push(
+    `${sequence}\t0\t3\t21\t0\t0\t0\t0\t${homeLat.toFixed(7)}\t${homeLng.toFixed(7)}\t${Number(altitude).toFixed(2)}\t1`,
+  );
+  return lines.join("\n");
+}
+
 function missionFromRow(row) {
   const record = parse(row);
   return {
@@ -346,6 +641,74 @@ async function api(request, response, url) {
     if (request.method === "DELETE" && parts[2]) {
       const result = deletePlatform(parts[2]);
       return send(response, result.errors ? 422 : 200, result);
+    }
+    return send(response, 405, { error: "Метод не поддерживается." });
+  }
+  if (parts[1] === "fleet") {
+    if (request.method === "GET" && !parts[2])
+      return send(response, 200, fleetRows());
+    if (request.method === "POST" && !parts[2]) {
+      const result = createFleetUnit(await body(request));
+      return send(response, result.errors ? 422 : 201, result);
+    }
+    if (request.method === "DELETE" && parts[2]) {
+      const result = deleteFleetUnit(parts[2]);
+      return send(response, result.errors ? 404 : 200, result);
+    }
+    if (request.method === "POST" && parts[2] === "allocate") {
+      const input = await body(request);
+      const units = fleetRows().filter((unit) =>
+        (input.fleetIds || []).includes(unit.id),
+      );
+      try {
+        const result = await runPythonAllocator({
+          plan: input.plan || {},
+          units,
+        });
+        return send(response, 200, result);
+      } catch (error) {
+        return send(response, 422, { errors: [error.message] });
+      }
+    }
+    if (request.method === "POST" && parts[2] === "live-start") {
+      const input = await body(request);
+      const assignment = input.assignment;
+      const unit = fleetRows().find(
+        (item) => item.id === input.uavId || item.id === assignment?.uavId,
+      );
+      if (!unit) return send(response, 404, { error: "БВС флота не найден." });
+      if (!assignment?.segments?.length)
+        return send(response, 422, { error: "У БВС нет назначенных галсов." });
+      try {
+        const result = await runMavlinkUploader({
+          connection:
+            input.connection ||
+            process.env.GEOSCAN_MAVLINK_CONNECTION ||
+            "udp:127.0.0.1:14550",
+          segments: assignment.segments,
+          home: assignment.home || [unit.homeLat, unit.homeLng],
+          altitudeM: input.altitudeM || 120,
+          transitAltitudeM: input.transitAltitudeM || 50,
+          timeoutSeconds: input.timeoutSeconds || 10,
+          autoMode: input.autoMode || 3,
+        });
+        return send(response, 200, result);
+      } catch (error) {
+        return send(response, 502, { error: error.message });
+      }
+    }
+    if (request.method === "POST" && parts[2] === "export-wpl") {
+      const input = await body(request);
+      const assignment = input.assignment;
+      if (!assignment)
+        return send(response, 422, {
+          errors: ["Не передано назначение маршрута."],
+        });
+      response.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${assignment.uavId || "uav"}.waypoints"`,
+      });
+      return response.end(missionPlannerWpl(assignment, input.altitude || 120));
     }
     return send(response, 405, { error: "Метод не поддерживается." });
   }

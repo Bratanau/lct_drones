@@ -13,6 +13,7 @@ function openDatabase(filename = path.join(__dirname, "data", "geoscan.db")) {
     CREATE TABLE IF NOT EXISTS restricted_zones (id TEXT PRIMARY KEY, name TEXT NOT NULL, geometry_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS missions (id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL, mode TEXT NOT NULL, platform_id TEXT, sensor_preset_id TEXT, payload_json TEXT NOT NULL, plan_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS mission_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, mission_id TEXT NOT NULL, event TEXT NOT NULL, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS fleet_units (id TEXT PRIMARY KEY, name TEXT NOT NULL, platform_id TEXT NOT NULL, home_lat REAL NOT NULL, home_lng REAL NOT NULL, payloads_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   `);
   seed(db);
   return db;

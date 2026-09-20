@@ -107,6 +107,66 @@ test("creates and deletes a custom UAV with full specifications", async () => {
   );
   assert.equal(deleted.status, 200);
 });
+test("stores fleet home, allocates segments and exports Mission Planner WPL", async () => {
+  const created = await fetch(`${baseUrl}/api/fleet`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Fleet Test 01",
+      platformId: "test-fixed-wing",
+      homeLat: 55.77,
+      homeLng: 37.59,
+      payloads: ["RGB", "LiDAR"],
+    }),
+  });
+  assert.equal(created.status, 201);
+  const unit = (await created.json()).unit;
+  const allocation = await fetch(`${baseUrl}/api/fleet/allocate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      plan: {
+        mode: "survey",
+        segments: [
+          [
+            [55.775, 37.6],
+            [55.776, 37.61],
+          ],
+          [
+            [55.776, 37.6],
+            [55.777, 37.61],
+          ],
+        ],
+      },
+      fleetIds: [unit.id],
+    }),
+  });
+  assert.equal(allocation.status, 200);
+  const result = await allocation.json();
+  assert.equal(result.assignments[0].segments.length, 2);
+  assert.equal(result.assignments[0].flightTrajectory[0][0], 55.77);
+  assert.equal(result.assignments[0].flightTrajectory.at(-1)[0], 55.77);
+  const wpl = await fetch(`${baseUrl}/api/fleet/export-wpl`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ assignment: result.assignments[0], altitude: 120 }),
+  });
+  assert.equal(wpl.status, 200);
+  assert.match(await wpl.text(), /QGC WPL 110/);
+  const removed = await fetch(`${baseUrl}/api/fleet/${unit.id}`, {
+    method: "DELETE",
+  });
+  assert.equal(removed.status, 200);
+});
+test("validates live MAVLink start request", async () => {
+  const response = await fetch(`${baseUrl}/api/fleet/live-start`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(response.status, 404);
+  assert.match((await response.json()).error, /БВС флота не найден/);
+});
 test("returns 422 for invalid planning input", async () => {
   const response = await fetch(`${baseUrl}/api/missions`, {
     method: "POST",

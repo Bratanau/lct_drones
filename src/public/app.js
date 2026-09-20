@@ -20,7 +20,11 @@ let routeLayer = null;
 let routeSegments = [];
 let missionId = localStorage.getItem("geoscan-planner-server-id");
 let platforms = [];
-let toastTimer;
+let fleetUnits = [];
+let fleetMarkers = new Map();
+let allocationLayer = null;
+let placementMode = false;
+let lastPlan = null;
 
 map.addControl(
   new L.Control.Draw({
@@ -76,9 +80,17 @@ document
   .addEventListener("change", (event) =>
     event.target.value ? openMission(event.target.value) : newMission(),
   );
-document.getElementById("platformSelect").addEventListener("change", () => {
-  updatePlatformInfo();
-  if (boundary) planRoute();
+document.getElementById("addFleetBtn").addEventListener("click", () => {
+  placementMode = true;
+  document.getElementById("map").classList.add("placing-fleet");
+  showToast("Кликните по карте, чтобы установить домашнюю площадку");
+});
+document.getElementById("allocateBtn").addEventListener("click", allocateFleet);
+map.on("click", (event) => {
+  if (!placementMode) return;
+  placementMode = false;
+  document.getElementById("map").classList.remove("placing-fleet");
+  addFleetUnitAt(event.latlng);
 });
 document.getElementById("addPlatformBtn").addEventListener("click", () => {
   document.getElementById("platformDialog").hidden = false;
@@ -127,6 +139,7 @@ document
   .addEventListener("change", saveMission);
 loadMission();
 loadServerData();
+loadFleet();
 
 function setBoundary(layer, fit = true) {
   drawnItems.clearLayers();
@@ -183,6 +196,7 @@ async function planRoute() {
 }
 
 function renderServerPlan(plan) {
+  lastPlan = plan;
   routeSegments = plan.segments;
   if (routeLayer) map.removeLayer(routeLayer);
   routeLayer = L.featureGroup([
@@ -461,6 +475,192 @@ async function deleteSelectedPlatform() {
   document.getElementById("detailsDialog").hidden = true;
   showToast("Пользовательский БВС удален");
   if (boundary) planRoute();
+}
+async function addFleetUnitAt(latlng) {
+  const name = window.prompt("Позывной БВС", `UAV-${fleetUnits.length + 1}`);
+  if (!name) return;
+  const platformId = document.getElementById("platformSelect").value;
+  const payloadText = window.prompt("Полезные нагрузки через запятую", "RGB");
+  const response = await fetch("/api/fleet", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      platformId,
+      homeLat: latlng.lat,
+      homeLng: latlng.lng,
+      payloads: (payloadText || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok)
+    return showToast(
+      result.errors?.join(" ") || "Не удалось добавить БВС во флот",
+    );
+  fleetUnits.push(result.unit);
+  renderFleet();
+  showToast(`${name}: домашняя площадка добавлена`);
+}
+function renderFleet() {
+  document.getElementById("fleetCount").textContent =
+    `${fleetUnits.length} БВС`;
+  const list = document.getElementById("fleetList");
+  list.innerHTML = fleetUnits
+    .map(
+      (unit) =>
+        `<div class="fleet-item"><span class="fleet-dot"></span><div><strong>${escapeHtml(unit.name)}</strong><small>${escapeHtml(unit.platform?.name || unit.platformId)} · ${unit.homeLat.toFixed(4)}, ${unit.homeLng.toFixed(4)}</small></div><button class="icon-button fleet-delete" data-fleet-id="${unit.id}" title="Удалить БВС" aria-label="Удалить БВС">×</button></div>`,
+    )
+    .join("");
+  list
+    .querySelectorAll(".fleet-delete")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        deleteFleetUnit(button.dataset.fleetId),
+      ),
+    );
+  for (const unit of fleetUnits) {
+    if (fleetMarkers.has(unit.id)) continue;
+    const marker = L.circleMarker([unit.homeLat, unit.homeLng], {
+      radius: 8,
+      color: "#ec7745",
+      fillColor: "#fff",
+      fillOpacity: 1,
+      weight: 3,
+    }).addTo(map);
+    marker.bindTooltip(unit.name, {
+      permanent: true,
+      direction: "right",
+      offset: [10, 0],
+    });
+    fleetMarkers.set(unit.id, marker);
+  }
+}
+async function loadFleet() {
+  const response = await fetch("/api/fleet");
+  if (!response.ok) return;
+  fleetUnits = await response.json();
+  renderFleet();
+}
+async function deleteFleetUnit(id) {
+  const response = await fetch(`/api/fleet/${id}`, { method: "DELETE" });
+  if (!response.ok) return showToast("Не удалось удалить БВС из флота");
+  fleetMarkers.get(id)?.remove();
+  fleetMarkers.delete(id);
+  fleetUnits = fleetUnits.filter((unit) => unit.id !== id);
+  renderFleet();
+}
+async function allocateFleet() {
+  if (!routeSegments.length) return showToast("Сначала постройте маршрут");
+  if (!fleetUnits.length) return showToast("Добавьте БВС на карту");
+  const response = await fetch("/api/fleet/allocate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan: { ...lastPlan, segments: routeSegments },
+      fleetIds: fleetUnits.map((unit) => unit.id),
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok || result.errors)
+    return showToast(
+      result.errors?.join(" ") || "Не удалось распределить маршрут",
+    );
+  renderAllocation(result);
+}
+function renderAllocation(result) {
+  if (allocationLayer) map.removeLayer(allocationLayer);
+  const colors = ["#115f9e", "#008b72", "#bd5b18", "#7a4fa3", "#b22d58"];
+  allocationLayer = L.featureGroup();
+  result.allocations.forEach((allocation, index) => {
+    const color = colors[index % colors.length];
+    L.polyline(allocation.flightTrajectory, {
+      color,
+      weight: 4,
+      opacity: 0.9,
+      lineJoin: "round",
+    }).addTo(allocationLayer);
+    allocation.color = color;
+  });
+  allocationLayer.addTo(map);
+  document.getElementById("fleetList").innerHTML = result.allocations
+    .map(
+      (allocation, index) =>
+        `<div class="fleet-item"><span class="fleet-color" style="background:${colors[index % colors.length]}"></span><div><strong>${escapeHtml(allocation.name)}</strong><small>${allocation.segments.length} галсов · ${(allocation.stats.distance_m / 1000).toFixed(2)} км · ${allocation.stats.flight_time_m} мин</small></div><button class="small-button export-fleet" data-uav-id="${allocation.uavId}" type="button">WPL</button><button class="small-button live-start" data-uav-id="${allocation.uavId}" type="button">LIVE START</button></div>`,
+    )
+    .join("");
+  document
+    .querySelectorAll(".export-fleet")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        exportFleetWpl(
+          result.allocations.find(
+            (allocation) => allocation.uavId === button.dataset.uavId,
+          ),
+        ),
+      ),
+    );
+  document
+    .querySelectorAll(".live-start")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        liveStart(
+          result.allocations.find(
+            (allocation) => allocation.uavId === button.dataset.uavId,
+          ),
+        ),
+      ),
+    );
+  showToast(
+    `Маршрут распределен: ${result.unassigned.length ? `${result.unassigned.length} галсов не назначено` : "все галсы назначены"}`,
+  );
+}
+async function liveStart(assignment) {
+  if (!assignment?.segments?.length)
+    return showToast("У БВС нет назначенных галсов");
+  if (
+    !window.confirm(
+      `Загрузить миссию и выполнить arm для «${assignment.name}»?`,
+    )
+  )
+    return;
+  const response = await fetch("/api/fleet/live-start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      uavId: assignment.uavId,
+      assignment,
+      altitudeM: document.getElementById("altitude").value,
+      timeoutSeconds: 10,
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok)
+    return showToast(
+      result.error || result.errors?.join(" ") || "LIVE START не выполнен",
+    );
+  showToast(
+    `Миссия загружена, БВС ${assignment.name} переведен в AUTO и armed`,
+  );
+}
+async function exportFleetWpl(assignment) {
+  const response = await fetch("/api/fleet/export-wpl", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      assignment,
+      altitude: document.getElementById("altitude").value,
+    }),
+  });
+  if (!response.ok) return showToast("Не удалось экспортировать WPL");
+  const blob = await response.blob();
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${assignment.name}.waypoints`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 async function loadServerData() {
   try {

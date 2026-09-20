@@ -77,6 +77,24 @@
           </div>
         </section>
 
+        <section class="panel-block fleet-tools">
+          <div class="section-heading">
+            <h2>Флот и депо</h2>
+            <span id="fleetCount" class="metric">0 БВС</span>
+          </div>
+          <div class="fleet-actions">
+            <button id="addFleetBtn" class="secondary-button" type="button">
+              Добавить БВС на карту</button
+            ><button id="allocateBtn" class="primary" type="button">
+              Распределить галсы
+            </button>
+          </div>
+          <p class="hint">
+            Кнопка добавления включает режим: кликните по карте, чтобы задать
+            домашнюю площадку БВС.
+          </p>
+          <div id="fleetList" class="fleet-list"></div>
+        </section>
         <section class="panel-block">
           <div class="section-heading">
             <h2>Контур работ</h2>
@@ -97,6 +115,7 @@
               class="icon-button"
               title="Очистить контур"
               aria-label="Очистить контур"
+              type="button"
             >
               ×
             </button>

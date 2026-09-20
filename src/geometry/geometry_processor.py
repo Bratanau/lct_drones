@@ -21,6 +21,31 @@ from .projection import (
 from .track_slicer import TrackSlicer
 
 
+def get_optimal_sweep_angle(polygon_geometry: Polygon) -> float:
+    """Return the long-axis azimuth of the minimum rotated rectangle.
+
+    The angle is normalized to ``[0, 180)`` because a sweep direction and its
+    reverse produce the same set of coverage lines. The caller rotates the
+    polygon by the negative angle so those lines become horizontal.
+    """
+    if polygon_geometry.is_empty or polygon_geometry.geom_type != "Polygon":
+        raise GeometryProcessorError("Для выбора угла нужен непустой Polygon.")
+    rectangle = polygon_geometry.minimum_rotated_rectangle
+    corners = list(rectangle.exterior.coords)[:-1]
+    edges = [
+        (corners[index], corners[(index + 1) % len(corners)])
+        for index in range(len(corners))
+    ]
+    start, end = max(
+        edges,
+        key=lambda edge: math.hypot(
+            edge[1][0] - edge[0][0], edge[1][1] - edge[0][1]
+        ),
+    )
+    angle = math.degrees(math.atan2(end[1] - start[1], end[0] - start[0]))
+    return angle % 180.0
+
+
 class FlightPlannerGeometry:
     """Строит параллельные галсы внутри полигона WGS84.
 
@@ -60,8 +85,8 @@ class FlightPlannerGeometry:
         polygon_wgs84 = self._build_polygon(request.coordinates)
         projection = select_utm_projection(polygon_wgs84)
         polygon_utm = project_polygon(polygon_wgs84, projection)
-        flight_angle = self._longest_edge_angle(polygon_utm)
-        rotated_polygon = rotate(polygon_utm, -flight_angle, origin="centroid")
+        flight_angle = get_optimal_sweep_angle(polygon_utm)
+        rotated_polygon = rotate(polygon_utm, -flight_angle, origin=polygon_utm.centroid)
         tracks = self.track_slicer.slice(rotated_polygon, request.track_spacing_m)
 
         result = [
@@ -98,20 +123,8 @@ class FlightPlannerGeometry:
 
     @staticmethod
     def _longest_edge_angle(polygon: Polygon) -> float:
-        """Возвращает угол самой длинной грани minimum rotated rectangle."""
-        rectangle = polygon.minimum_rotated_rectangle
-        corners = list(rectangle.exterior.coords)[:-1]
-        edges = [
-            (corners[index], corners[(index + 1) % len(corners)])
-            for index in range(len(corners))
-        ]
-        start, end = max(
-            edges,
-            key=lambda edge: math.hypot(
-                edge[1][0] - edge[0][0], edge[1][1] - edge[0][1]
-            ),
-        )
-        return math.degrees(math.atan2(end[1] - start[1], end[0] - start[0]))
+        """Backward-compatible alias for the public sweep-angle helper."""
+        return get_optimal_sweep_angle(polygon)
 
     def _format_track(
         self,
