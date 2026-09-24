@@ -11,6 +11,7 @@ from typing import Any
 
 from shapely.geometry import LineString, Point, Polygon, MultiPolygon, shape
 
+from ..optimizer import OptimizerError, optimize
 from .geometry_processor import FlightPlannerGeometry
 from .models import GeometryProcessorError
 from .projection import project_polygon, select_utm_projection
@@ -48,6 +49,7 @@ def plan_mission(payload: dict[str, Any]) -> dict[str, Any]:
     if platform_errors:
         return {"errors": platform_errors}
 
+    route_order = None
     if (geometry.geom_type == "LineString"):
         segments = _line_segments(geometry)
         angle = None
@@ -73,6 +75,7 @@ def plan_mission(payload: dict[str, Any]) -> dict[str, Any]:
                 ]
                 for track in tracks
             ]
+            segments, route_order = _optimize_track_order(tracks, segments, speed, spacing)
             points = []
         if mode == "inspection":
             angle = 0.0
@@ -99,6 +102,7 @@ def plan_mission(payload: dict[str, Any]) -> dict[str, Any]:
             "points": points,
             "flights": flights["flights"],
             "battery": flights["summary"],
+            "routeOrder": route_order,
             "alternatives": [],
             "recommendations": [],
             "safety": {"blocking": [], "warnings": ["Нет данных DEM: высота рассчитывается относительно точки взлёта."]},
@@ -159,6 +163,46 @@ def _contour_plan(
         if current.is_empty:
             break
     return segments
+
+
+def _optimize_track_order(
+    tracks: list[dict[str, Any]],
+    raster_segments: list[list[list[float]]],
+    speed: float,
+    spacing: float,
+) -> tuple[list[list[list[float]]], dict[str, Any]]:
+    """Порядок и направления галсов от ``src.optimizer``.
+
+    Нарезка отдаёт галсы «растром»: строка за строкой, каждый слева направо.
+    Распределение по флоту режет маршрут на блоки в заданном порядке, поэтому
+    порядок здесь напрямую влияет на число БВС и налёт. При ошибке
+    оптимизатора остаётся растровый порядок — план всё равно строится.
+    """
+    try:
+        route = optimize(
+            {
+                "tracks": tracks,
+                "speed": speed,
+                "turnPenaltyM": min(20, spacing * 0.75),
+                "timeLimitS": 1.0,
+            }
+        )["route"]
+    except OptimizerError as error:
+        return raster_segments, {"method": "raster", "reason": str(error)}
+    segments = [
+        [
+            [visit["startLonLat"][1], visit["startLonLat"][0]],
+            [visit["endLonLat"][1], visit["endLonLat"][0]],
+        ]
+        for flight in route["flights"]
+        for visit in flight["visits"]
+    ]
+    return segments, {
+        "method": "optimized",
+        "totalDistanceM": route["metrics"]["totalDistanceM"],
+        "snakeTotalDistanceM": route["baseline"]["totalDistanceM"],
+        "improvementPercentVsSnake": route["improvementPercent"],
+    }
 
 
 def _inspection_plan(polygon: Polygon, projection: Any, spacing: float) -> tuple[list[list[list[float]]], list[list[float]]]:
@@ -231,9 +275,10 @@ def _split_flights(segments: list[list[list[float]]], speed: float, platform: di
 
 
 def _distance(first: list[float], second: list[float]) -> float:
+    """Расстояние в метрах между точками ``[lat, lon]``."""
     latitude_scale = 111_320
     longitude_scale = latitude_scale * math.cos(math.radians((first[0] + second[0]) / 2))
-    return math.hypot((second[1] - first[1]) * latitude_scale, (second[0] - first[0]) * longitude_scale)
+    return math.hypot((second[0] - first[0]) * latitude_scale, (second[1] - first[1]) * longitude_scale)
 
 
 def _number(value: Any) -> float:

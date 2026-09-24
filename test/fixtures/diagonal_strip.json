@@ -1,0 +1,38 @@
+[
+  {
+    "task_id": "track-1",
+    "start_node_lonlat": [37.904572, 55.66],
+    "end_node_lonlat": [37.944577, 55.685],
+    "length_m": 3751.46
+  },
+  {
+    "task_id": "track-2",
+    "start_node_lonlat": [37.903715, 55.66],
+    "end_node_lonlat": [37.943719, 55.685],
+    "length_m": 3751.42
+  },
+  {
+    "task_id": "track-3",
+    "start_node_lonlat": [37.902858, 55.66],
+    "end_node_lonlat": [37.942861, 55.685],
+    "length_m": 3751.38
+  },
+  {
+    "task_id": "track-4",
+    "start_node_lonlat": [37.902001, 55.66],
+    "end_node_lonlat": [37.942003, 55.685],
+    "length_m": 3751.33
+  },
+  {
+    "task_id": "track-5",
+    "start_node_lonlat": [37.901144, 55.66],
+    "end_node_lonlat": [37.941145, 55.685],
+    "length_m": 3751.29
+  },
+  {
+    "task_id": "track-6",
+    "start_node_lonlat": [37.900287, 55.66],
+    "end_node_lonlat": [37.940287, 55.685],
+    "length_m": 3751.25
+  }
+]

@@ -24,9 +24,10 @@ class AllocationError(ValueError):
 
 
 def distance_m(first: list[float], second: list[float]) -> float:
+    """Расстояние в метрах между точками ``[lat, lon]``."""
     latitude_scale = 111_320.0
     longitude_scale = latitude_scale * math.cos(math.radians((first[0] + second[0]) / 2))
-    return math.hypot((second[1] - first[1]) * latitude_scale, (second[0] - first[0]) * longitude_scale)
+    return math.hypot((second[0] - first[0]) * latitude_scale, (second[1] - first[1]) * longitude_scale)
 
 
 def _track_centroid(track: list[list[float]]) -> list[float]:
