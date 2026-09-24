@@ -48,6 +48,7 @@ test("creates, updates, lists, versions, exports and deletes mission", async () 
   const created = await response.json();
   missionId = created.id;
   assert.ok(created.plan.segments.length);
+  assert.ok(["optimized", "raster"].includes(created.plan.routeOrder?.method));
   response = await fetch(`${baseUrl}/api/missions/${missionId}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -166,14 +167,90 @@ test("stores fleet home, allocates segments and exports Mission Planner WPL", as
   });
   assert.equal(removed.status, 200);
 });
-test("validates live MAVLink start request", async () => {
+test("keeps live MAVLink start disabled unless explicitly armed", async () => {
   const response = await fetch(`${baseUrl}/api/fleet/live-start`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({}),
   });
-  assert.equal(response.status, 404);
-  assert.match((await response.json()).error, /БВС флота не найден/);
+  assert.equal(response.status, 403);
+  assert.match((await response.json()).error, /GEOSCAN_ALLOW_LIVE_ARM/);
+});
+test("validates live MAVLink start request once armed", async () => {
+  process.env.GEOSCAN_ALLOW_LIVE_ARM = "1";
+  try {
+    const response = await fetch(`${baseUrl}/api/fleet/live-start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(response.status, 404);
+    assert.match((await response.json()).error, /БВС флота не найден/);
+  } finally {
+    delete process.env.GEOSCAN_ALLOW_LIVE_ARM;
+  }
+});
+test("rejects an unsupported export format without mutating the mission", async () => {
+  const created = await fetch(`${baseUrl}/api/missions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const mission = await created.json();
+  const response = await fetch(
+    `${baseUrl}/api/missions/${mission.id}/export?format=shapefile`,
+  );
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Неподдерживаемый формат/);
+  const reloaded = await fetch(`${baseUrl}/api/missions/${mission.id}`);
+  assert.equal((await reloaded.json()).status, "planned");
+});
+test("rejects an unknown mission mode before calling the planner", async () => {
+  const response = await fetch(`${baseUrl}/api/missions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...payload, mode: "flyby" }),
+  });
+  assert.equal(response.status, 422);
+  assert.match((await response.json()).errors.join(" "), /mode/);
+});
+test("keeps a platform that is referenced by a mission or fleet unit", async () => {
+  const created = await fetch(`${baseUrl}/api/platforms`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "In-use VTOL",
+      minAltitudeM: 30,
+      maxAltitudeM: 300,
+      maxSpeedMS: 22,
+      maxRangeM: 18000,
+      flightMinutes: 45,
+      reservePercent: 25,
+      batteryWh: 420,
+    }),
+  });
+  const platformId = (await created.json()).platform.id;
+  const unit = await fetch(`${baseUrl}/api/fleet`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "In-use fleet unit",
+      platformId,
+      homeLat: 55.7,
+      homeLng: 37.6,
+    }),
+  });
+  const unitId = (await unit.json()).unit.id;
+  const blocked = await fetch(`${baseUrl}/api/platforms/${platformId}`, {
+    method: "DELETE",
+  });
+  assert.equal(blocked.status, 422);
+  assert.match((await blocked.json()).errors.join(" "), /используется/);
+  await fetch(`${baseUrl}/api/fleet/${unitId}`, { method: "DELETE" });
+  const allowed = await fetch(`${baseUrl}/api/platforms/${platformId}`, {
+    method: "DELETE",
+  });
+  assert.equal(allowed.status, 200);
 });
 test("returns 422 for invalid planning input", async () => {
   const response = await fetch(`${baseUrl}/api/missions`, {

@@ -13,6 +13,13 @@ const {
 const ROOT = path.resolve(__dirname, "..");
 const PUBLIC_ROOT = path.join(__dirname, "public");
 const PORT = Number(process.env.GEOSCAN_PORT || 4173);
+const MISSION_MODES = new Set(["survey", "inspection", "corridor", "lidar"]);
+const MISSION_STATUSES = new Set(["draft", "planned", "exported"]);
+const EXPORT_FORMATS = new Set(["geojson", "kml", "csv", "waypoints"]);
+// live-start реально ставит борт на охрану и в AUTO, поэтому выключен по умолчанию.
+function isLiveArmEnabled() {
+  return process.env.GEOSCAN_ALLOW_LIVE_ARM === "1";
+}
 const db = openDatabase(
   process.env.GEOSCAN_DB || path.join(ROOT, "data", "geoscan.db"),
 );
@@ -25,20 +32,25 @@ const MIME = {
 function now() {
   return new Date().toISOString();
 }
+function clientError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
 function body(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     request.on("data", (chunk) => {
       size += chunk.length;
-      if (size > 1_000_000) reject(new Error("Тело запроса превышает 1 МБ."));
+      if (size > 1_000_000) reject(clientError("Тело запроса превышает 1 МБ."));
       else chunks.push(chunk);
     });
     request.on("end", () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString() || "{}"));
       } catch (_) {
-        reject(new Error("Некорректный JSON."));
+        reject(clientError("Некорректный JSON."));
       }
     });
     request.on("error", reject);
@@ -52,8 +64,14 @@ function send(response, status, data, headers = {}) {
   });
   response.end(data === undefined ? "" : JSON.stringify(data));
 }
+function sendError(response, error, fallbackStatus = 422) {
+  if (error.isWorkerFault)
+    return send(response, 502, { errors: [error.message] });
+  const status = error.statusCode || fallbackStatus;
+  return send(response, status, { errors: [error.message] });
+}
 function normalizePlatformInput(input) {
-  const numericFields = [
+  const requiredNumericFields = [
     "minAltitudeM",
     "maxAltitudeM",
     "maxSpeedMS",
@@ -61,6 +79,9 @@ function normalizePlatformInput(input) {
     "flightMinutes",
     "reservePercent",
     "batteryWh",
+  ];
+  // Не участвуют в расчете плана.
+  const optionalNumericFields = [
     "takeoffWeightKg",
     "payloadCapacityKg",
     "cruiseSpeedMS",
@@ -71,7 +92,21 @@ function normalizePlatformInput(input) {
     propulsion: String(input.propulsion || "").slice(0, 80),
     launchType: String(input.launchType || "").slice(0, 80),
   };
-  for (const field of numericFields) {
+  for (const field of requiredNumericFields) {
+    const value = Number(input[field]);
+    if (!Number.isFinite(value) || value < 0)
+      throw new Error(`Поле ${field} должно быть неотрицательным числом.`);
+    config[field] = value;
+  }
+  for (const field of optionalNumericFields) {
+    if (
+      input[field] === undefined ||
+      input[field] === null ||
+      input[field] === ""
+    ) {
+      config[field] = 0;
+      continue;
+    }
     const value = Number(input[field]);
     if (!Number.isFinite(value) || value < 0)
       throw new Error(`Поле ${field} должно быть неотрицательным числом.`);
@@ -107,6 +142,18 @@ function deletePlatform(id) {
   const config = JSON.parse(row.config_json);
   if (!config.userDefined)
     return { errors: ["Системные платформы нельзя удалить."] };
+  const missionCount = db
+    .prepare("SELECT COUNT(*) AS count FROM missions WHERE platform_id=?")
+    .get(id).count;
+  const fleetCount = db
+    .prepare("SELECT COUNT(*) AS count FROM fleet_units WHERE platform_id=?")
+    .get(id).count;
+  if (missionCount || fleetCount)
+    return {
+      errors: [
+        `Платформа используется: миссий — ${missionCount}, БВС флота — ${fleetCount}. Сначала отвяжите их.`,
+      ],
+    };
   db.prepare("DELETE FROM platforms WHERE id=?").run(id);
   return { ok: true };
 }
@@ -200,7 +247,67 @@ function snapshot(id, event) {
       "INSERT INTO mission_versions (mission_id, event, snapshot_json, created_at) VALUES (?, ?, ?, ?)",
     ).run(id, event, JSON.stringify(missionFromRow(row)), now());
 }
+function validateMissionInput(input) {
+  const errors = [];
+  if (input.mode !== undefined && !MISSION_MODES.has(input.mode))
+    errors.push(
+      `Поле mode должно быть одним из: ${[...MISSION_MODES].join(", ")}.`,
+    );
+  if (input.status !== undefined && !MISSION_STATUSES.has(input.status))
+    errors.push(
+      `Поле status должно быть одним из: ${[...MISSION_STATUSES].join(", ")}.`,
+    );
+  if (!input.boundary && !input.geometry)
+    errors.push("Передайте контур работ: boundary или geometry.");
+  return errors;
+}
+// Миссия и ее версия пишутся атомарно.
+const persistMission = db.transaction(
+  (
+    id,
+    payload,
+    status,
+    platformId,
+    sensorPresetId,
+    planJson,
+    timestamp,
+    isUpdate,
+  ) => {
+    if (isUpdate)
+      db.prepare(
+        "UPDATE missions SET title=?, status=?, mode=?, platform_id=?, sensor_preset_id=?, payload_json=?, plan_json=?, updated_at=? WHERE id=?",
+      ).run(
+        payload.title,
+        status,
+        payload.mode,
+        platformId,
+        sensorPresetId,
+        JSON.stringify(payload),
+        planJson,
+        timestamp,
+        id,
+      );
+    else
+      db.prepare(
+        "INSERT INTO missions (id,title,status,mode,platform_id,sensor_preset_id,payload_json,plan_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      ).run(
+        id,
+        payload.title,
+        status,
+        payload.mode,
+        platformId,
+        sensorPresetId,
+        JSON.stringify(payload),
+        planJson,
+        timestamp,
+        timestamp,
+      );
+    snapshot(id, isUpdate ? "updated" : "created");
+  },
+);
 async function saveMission(input, existing) {
+  const validationErrors = validateMissionInput(input);
+  if (validationErrors.length) return { errors: validationErrors };
   const selectedPlatform = platform(input.platformId || existing?.platform_id);
   if (!selectedPlatform) return { errors: ["Выбранная платформа не найдена."] };
   const result = await runPythonPlanner(input, selectedPlatform);
@@ -216,36 +323,16 @@ async function saveMission(input, existing) {
     terrainElevationM: input.terrainElevationM,
   };
   const status = input.status || "planned";
-  if (existing)
-    db.prepare(
-      "UPDATE missions SET title=?, status=?, mode=?, platform_id=?, sensor_preset_id=?, payload_json=?, plan_json=?, updated_at=? WHERE id=?",
-    ).run(
-      payload.title,
-      status,
-      payload.mode,
-      selectedPlatform.id,
-      input.sensorPresetId || null,
-      JSON.stringify(payload),
-      JSON.stringify(result.plan),
-      timestamp,
-      id,
-    );
-  else
-    db.prepare(
-      "INSERT INTO missions (id,title,status,mode,platform_id,sensor_preset_id,payload_json,plan_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-    ).run(
-      id,
-      payload.title,
-      status,
-      payload.mode,
-      selectedPlatform.id,
-      input.sensorPresetId || null,
-      JSON.stringify(payload),
-      JSON.stringify(result.plan),
-      timestamp,
-      timestamp,
-    );
-  snapshot(id, existing ? "updated" : "created");
+  persistMission(
+    id,
+    payload,
+    status,
+    selectedPlatform.id,
+    input.sensorPresetId || null,
+    JSON.stringify(result.plan),
+    timestamp,
+    Boolean(existing),
+  );
   return {
     mission: missionFromRow(
       db.prepare("SELECT * FROM missions WHERE id=?").get(id),
@@ -404,12 +491,17 @@ async function api(request, response, url) {
           plan: input.plan || {},
           units,
         });
-        return send(response, 200, result);
+        return send(response, result.errors ? 422 : 200, result);
       } catch (error) {
-        return send(response, 422, { errors: [error.message] });
+        return sendError(response, error);
       }
     }
     if (request.method === "POST" && parts[2] === "live-start") {
+      if (!isLiveArmEnabled())
+        return send(response, 403, {
+          error:
+            "LIVE START отключен. Установите GEOSCAN_ALLOW_LIVE_ARM=1, чтобы разрешить вооружение борта по MAVLink.",
+        });
       const input = await body(request);
       const assignment = input.assignment;
       const unit = fleetRows().find(
@@ -431,9 +523,9 @@ async function api(request, response, url) {
           timeoutSeconds: input.timeoutSeconds || 10,
           autoMode: input.autoMode || 3,
         });
-        return send(response, 200, result);
+        return send(response, result.errors ? 422 : 200, result);
       } catch (error) {
-        return send(response, 502, { error: error.message });
+        return sendError(response, error, 502);
       }
     }
     if (request.method === "POST" && parts[2] === "export-wpl") {
@@ -471,7 +563,7 @@ async function api(request, response, url) {
         ? send(response, 422, saved)
         : send(response, 201, saved.mission);
     } catch (error) {
-      return send(response, 422, { errors: [error.message] });
+      return sendError(response, error);
     }
   }
   const row = db.prepare("SELECT * FROM missions WHERE id=?").get(id);
@@ -494,17 +586,29 @@ async function api(request, response, url) {
         })),
     );
   if (parts[3] === "duplicate" && request.method === "POST") {
-    const duplicate = await saveMission({
-      ...mission,
-      title: `${mission.title} (копия)`,
-      status: "draft",
-    });
-    return duplicate.errors
-      ? send(response, 422, duplicate)
-      : send(response, 201, duplicate.mission);
+    try {
+      const duplicate = await saveMission({
+        ...mission,
+        title: `${mission.title} (копия)`,
+        status: "draft",
+      });
+      return duplicate.errors
+        ? send(response, 422, duplicate)
+        : send(response, 201, duplicate.mission);
+    } catch (error) {
+      return sendError(response, error);
+    }
   }
   if (parts[3] === "export" && request.method === "GET") {
     const format = url.searchParams.get("format") || "geojson";
+    if (!EXPORT_FORMATS.has(format))
+      return send(response, 400, {
+        error: `Неподдерживаемый формат экспорта. Доступно: ${[...EXPORT_FORMATS].join(", ")}.`,
+      });
+    if (!mission.plan)
+      return send(response, 409, {
+        error: "У миссии еще нет рассчитанного плана.",
+      });
     const content =
       format === "kml"
         ? exportKml(mission)
@@ -539,7 +643,7 @@ async function api(request, response, url) {
         ? send(response, 422, saved)
         : send(response, 200, saved.mission);
     } catch (error) {
-      return send(response, 422, { errors: [error.message] });
+      return sendError(response, error);
     }
   }
   if (request.method === "DELETE") {
@@ -583,7 +687,8 @@ const server = http.createServer(async (request, response) => {
       return await api(request, response, url);
     return await staticFile(request, response, url);
   } catch (error) {
-    send(response, 400, { error: error.message || "Ошибка сервера." });
+    const status = error.isWorkerFault ? 502 : error.statusCode || 500;
+    send(response, status, { error: error.message || "Ошибка сервера." });
   }
 });
 if (require.main === module)
