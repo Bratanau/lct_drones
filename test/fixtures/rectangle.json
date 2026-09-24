@@ -1,0 +1,110 @@
+[
+  {
+    "task_id": "track-1",
+    "start_node_lonlat": [37.91505, 55.677775],
+    "end_node_lonlat": [37.892015, 55.677775],
+    "length_m": 1448.66
+  },
+  {
+    "task_id": "track-2",
+    "start_node_lonlat": [37.91505, 55.677326],
+    "end_node_lonlat": [37.892015, 55.677326],
+    "length_m": 1448.67
+  },
+  {
+    "task_id": "track-3",
+    "start_node_lonlat": [37.91505, 55.676877],
+    "end_node_lonlat": [37.892015, 55.676877],
+    "length_m": 1448.69
+  },
+  {
+    "task_id": "track-4",
+    "start_node_lonlat": [37.91505, 55.676428],
+    "end_node_lonlat": [37.892015, 55.676428],
+    "length_m": 1448.71
+  },
+  {
+    "task_id": "track-5",
+    "start_node_lonlat": [37.91505, 55.675978],
+    "end_node_lonlat": [37.892015, 55.675978],
+    "length_m": 1448.72
+  },
+  {
+    "task_id": "track-6",
+    "start_node_lonlat": [37.91505, 55.675529],
+    "end_node_lonlat": [37.892015, 55.675529],
+    "length_m": 1448.74
+  },
+  {
+    "task_id": "track-7",
+    "start_node_lonlat": [37.91505, 55.67508],
+    "end_node_lonlat": [37.892015, 55.67508],
+    "length_m": 1448.76
+  },
+  {
+    "task_id": "track-8",
+    "start_node_lonlat": [37.91505, 55.674631],
+    "end_node_lonlat": [37.892015, 55.674631],
+    "length_m": 1448.77
+  },
+  {
+    "task_id": "track-9",
+    "start_node_lonlat": [37.91505, 55.674181],
+    "end_node_lonlat": [37.892015, 55.674181],
+    "length_m": 1448.79
+  },
+  {
+    "task_id": "track-10",
+    "start_node_lonlat": [37.91505, 55.673732],
+    "end_node_lonlat": [37.892015, 55.673732],
+    "length_m": 1448.81
+  },
+  {
+    "task_id": "track-11",
+    "start_node_lonlat": [37.91505, 55.673283],
+    "end_node_lonlat": [37.892015, 55.673283],
+    "length_m": 1448.82
+  },
+  {
+    "task_id": "track-12",
+    "start_node_lonlat": [37.91505, 55.672834],
+    "end_node_lonlat": [37.892015, 55.672834],
+    "length_m": 1448.84
+  },
+  {
+    "task_id": "track-13",
+    "start_node_lonlat": [37.91505, 55.672384],
+    "end_node_lonlat": [37.892015, 55.672384],
+    "length_m": 1448.86
+  },
+  {
+    "task_id": "track-14",
+    "start_node_lonlat": [37.91505, 55.671935],
+    "end_node_lonlat": [37.892015, 55.671935],
+    "length_m": 1448.87
+  },
+  {
+    "task_id": "track-15",
+    "start_node_lonlat": [37.91505, 55.671486],
+    "end_node_lonlat": [37.892015, 55.671486],
+    "length_m": 1448.89
+  },
+  {
+    "task_id": "track-16",
+    "start_node_lonlat": [37.91505, 55.671037],
+    "end_node_lonlat": [37.892015, 55.671037],
+    "length_m": 1448.91
+  },
+  {
+    "task_id": "track-17",
+    "start_node_lonlat": [37.91505, 55.670587],
+    "end_node_lonlat": [37.892015, 55.670587],
+    "length_m": 1448.92
+  },
+  {
+    "task_id": "track-18",
+    "start_node_lonlat": [37.91505, 55.670138],
+    "end_node_lonlat": [37.892015, 55.670138],
+    "length_m": 1448.94
+  }
+]
