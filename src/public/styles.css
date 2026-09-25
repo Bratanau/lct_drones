@@ -125,38 +125,102 @@ button {
   display: flex;
 }
 .sidebar {
-  width: 338px;
-  min-width: 300px;
+  width: 380px;
+  min-width: 340px;
   overflow-y: auto;
   background: var(--paper);
   border-right: 1px solid var(--line);
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  scrollbar-color: #b9c8c7 transparent;
+}
+.sidebar::before {
+  content: "Параметры миссии";
+  display: block;
+  padding: 14px 20px 11px;
+  color: var(--muted);
+  background: #f4f8f7;
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .panel-block {
-  padding: 18px 18px 17px;
+  padding: 20px;
   border-bottom: 1px solid var(--line);
+}
+.section-mission {
+  order: 1;
+}
+.section-area {
+  order: 2;
+}
+.section-task {
+  order: 3;
+}
+.section-settings {
+  order: 4;
+}
+.section-fleet {
+  order: 5;
+}
+.section-summary {
+  order: 6;
+}
+.section-area,
+.section-settings {
+  background: #fbfcfc;
+}
+.section-summary {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: #eef6f4;
+  border-top: 1px solid #c9dcda;
+  box-shadow: 0 -6px 18px #193b3912;
 }
 .section-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 13px;
+  margin-bottom: 14px;
 }
 .section-heading h2 {
   font:
-    700 13px Manrope,
+    700 14px Manrope,
     sans-serif;
   margin: 0;
+}
+.section-heading h2::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 13px;
+  margin: 0 8px 0 0;
+  vertical-align: -1px;
+  background: var(--teal);
 }
 .metric {
   color: var(--teal);
   font-weight: 700;
 }
 .hint {
+  max-width: 31em;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
   margin: 9px 0 0;
+}
+.fleet-list:empty::after {
+  content: "Добавьте БВС, чтобы увидеть состав флота";
+  display: block;
+  padding: 12px 8px;
+  color: var(--muted);
+  border: 1px dashed #cbd8d7;
+  text-align: center;
+  font-size: 11px;
 }
 .import-row {
   display: flex;
@@ -235,13 +299,30 @@ input[type="file"] {
 .mission-tools > select {
   width: 100%;
 }
+.mission-tools > select,
+.mission-tools label select,
+.settings select,
+.settings input,
+.fleet-tools select {
+  min-height: 36px;
+  border: 1px solid #c7d4d3;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 10px;
+  outline-color: var(--teal);
+}
 #map.placing-fleet {
   cursor: crosshair;
 }
 .fleet-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.fleet-actions .primary {
+  order: -1;
+  min-height: 38px;
 }
 .fleet-list {
   display: grid;
@@ -439,11 +520,16 @@ input[type="file"] {
   padding: 5px 8px;
   font-size: 11px;
 }
-.settings label {
+.settings label,
+.fleet-tools > label {
   display: block;
   color: #56676a;
   font-size: 11px;
-  margin-bottom: 12px;
+  margin-bottom: 13px;
+}
+.settings label:last-child,
+.fleet-tools > label:last-of-type {
+  margin-bottom: 0;
 }
 .settings select,
 .settings input {
@@ -458,13 +544,20 @@ input[type="file"] {
   padding: 0 8px;
   outline-color: var(--teal);
 }
-.two-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+.settings .platform-info,
+.fleet-tools .platform-info {
+  margin: -2px 0 14px;
+}
+.settings .two-fields {
+  gap: 12px;
 }
 .route-summary {
-  background: #f4f8f7;
+  background: #eef6f4;
+  border-top: 1px solid #c9dcda;
+  box-shadow: 0 -6px 18px #193b3912;
+}
+.route-summary .section-heading {
+  margin-bottom: 16px;
 }
 .quiet-status {
   color: var(--muted);
@@ -492,7 +585,10 @@ input[type="file"] {
 }
 .plan-button {
   width: 100%;
-  margin-top: 17px;
+  min-height: 42px;
+  margin-top: 20px;
+  font-size: 13px;
+  box-shadow: 0 4px 10px #007d7626;
 }
 .map-shell {
   position: relative;
@@ -597,6 +693,12 @@ input[type="file"] {
 #toast.visible {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+@media (max-width: 900px) {
+  .sidebar {
+    width: 350px;
+    min-width: 320px;
+  }
 }
 @media (max-width: 720px) {
   .topbar {

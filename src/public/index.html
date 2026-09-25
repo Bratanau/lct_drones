@@ -44,7 +44,7 @@
 
     <main class="workspace">
       <aside class="sidebar" aria-label="Параметры миссии">
-        <section class="panel-block mission-tools">
+        <section class="panel-block mission-tools section-mission">
           <div class="section-heading">
             <h2>Миссии</h2>
             <button id="duplicateBtn" class="small-button" type="button">
@@ -77,7 +77,7 @@
           </div>
         </section>
 
-        <section class="panel-block fleet-tools">
+        <section class="panel-block fleet-tools section-fleet">
           <div class="section-heading">
             <h2>Флот и депо</h2>
             <span id="fleetCount" class="metric">0 БВС</span>
@@ -107,7 +107,7 @@
           ></div>
           <div id="fleetList" class="fleet-list"></div>
         </section>
-        <section class="panel-block">
+        <section class="panel-block section-area">
           <div class="section-heading">
             <h2>Контур работ</h2>
             <span id="areaLabel" class="metric">0 га</span>
@@ -137,7 +137,7 @@
           </p>
         </section>
 
-        <section class="panel-block">
+        <section class="panel-block section-task">
           <div class="section-heading"><h2>Тип задания</h2></div>
           <div class="segmented" role="group" aria-label="Тип задания">
             <button class="selected" type="button" data-mode="survey">
@@ -148,7 +148,7 @@
           </div>
         </section>
 
-        <section class="panel-block settings">
+        <section class="panel-block settings section-settings">
           <div class="section-heading"><h2>Полезная нагрузка</h2></div>
           <label
             >Сенсор<select id="sensor">
@@ -207,7 +207,7 @@
           </div>
         </section>
 
-        <section class="panel-block route-summary">
+        <section class="panel-block route-summary section-summary">
           <div class="section-heading">
             <h2>Расчёт миссии</h2>
             <span id="routeStatus" class="quiet-status">Нет контура</span>
